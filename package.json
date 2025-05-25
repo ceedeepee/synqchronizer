@@ -1,0 +1,33 @@
+{
+  "name": "synqchronizer",
+  "version": "1.0.0",
+  "description": "CLI wrapper for launching and managing Multisynq synchronizer Docker containers",
+  "bin": {
+    "synqchronize": "./index.js"
+  },
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ceedeepee/synqchronizer.git"
+  },
+  "keywords": [
+    "multisynq",
+    "synchronizer",
+    "docker",
+    "cli",
+    "depin"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "chalk": "^5.0.0",
+    "commander": "^11.0.0",
+    "inquirer": "^9.0.0"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ]
+}
