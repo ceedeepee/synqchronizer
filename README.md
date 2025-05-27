@@ -1,6 +1,42 @@
 # synqchronizer
 
-CLI wrapper for the Multisynq Synchronizer headless service.
+🚀 **Complete CLI toolkit for Multisynq Synchronizer** - Docker container management, auto-installation, systemd service generation, and real-time web dashboard with performance monitoring.
+
+[![npm version](https://badge.fury.io/js/synqchronizer.svg)](https://www.npmjs.com/package/synqchronizer)
+[![Node.js Version](https://img.shields.io/node/v/synqchronizer.svg)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Downloads](https://img.shields.io/npm/dm/synqchronizer.svg)](https://www.npmjs.com/package/synqchronizer)
+
+## ✨ Features
+
+### 🎯 Core Functionality
+- 🔧 **Interactive Setup** - Guided configuration with prompts for Synq key and wallet
+- 🐳 **Smart Docker Management** - Auto-install Docker on Linux with multi-distro support
+- 🔐 **Permission Handling** - Automatic Docker permissions fix with user group management
+- ⚙️ **Systemd Integration** - Generate service files for headless operation
+- 🌐 **Cross-platform** - Full support for Linux, macOS, and Windows
+- 🏗️ **Platform Detection** - Automatic Docker architecture detection (ARM64/AMD64)
+
+### 🌐 Web Dashboard & Monitoring
+- 📊 **Performance Metrics** - Real-time traffic, sessions, and user monitoring
+- 🎯 **Quality of Service (QoS)** - Visual monitoring with reliability, availability, and efficiency scores
+- 📈 **Live Charts** - Circular progress indicators with color-coded status (green/yellow/red)
+- 📋 **Real-time Logs** - Systemd logs with syntax highlighting and auto-refresh
+- 🔗 **API Documentation** - Built-in endpoint documentation with method badges
+- 🔄 **Auto-refresh** - Dashboard updates every 5 seconds automatically
+
+### 🔧 Advanced Features
+- 🛠️ **Built-in Troubleshooting** - Comprehensive error handling and helpful solutions
+- 🔍 **Dynamic NPX Detection** - Smart detection of npm/npx installation paths
+- 📦 **Lightweight** - Only ~16KB package size with minimal dependencies
+- 🚀 **Enhanced Help** - Comprehensive feature documentation in CLI help
+- 🔒 **Security Features** - Masked sensitive data display with click-to-reveal
+
+## Prerequisites
+
+- **Node.js** v10 or higher
+- **Docker** (can be auto-installed on Linux)
+- **Synq key** from Multisynq platform
 
 ## Installation
 
@@ -8,19 +44,306 @@ CLI wrapper for the Multisynq Synchronizer headless service.
 npm install -g synqchronizer
 ```
 
-## Usage
+## Quick Start
 
 ```bash
-synqchronize init      # Interactive configuration (Synq key, wallet/account, registry, etc.)
-synqchronize start     # Build and run the synchronizer Docker container
-synqchronize service   # Generate a systemd service unit and environment file for headless setup
+# 1. Configure your synchronizer
+synqchronizer init
+
+# 2. Start the synchronizer
+synqchronizer start
+
+# 3. (Optional) Set up as a system service
+synqchronizer service
+
+# 4. Check service status and performance
+synqchronizer status
+
+# 5. Launch web dashboard with performance monitoring
+synqchronizer web
 ```
 
-After running `synqchronize service`, copy the generated service file to `/etc/systemd/system/` and enable it:
+## Commands Reference
+
+| Command | Description | Features |
+|---------|-------------|----------|
+| `synqchronizer init` | Interactive configuration setup | Synq key, wallet, sync name configuration |
+| `synqchronizer start` | Run synchronizer Docker container | Auto platform detection, Docker checks |
+| `synqchronizer service` | Generate systemd service file | Headless operation, auto-start configuration |
+| `synqchronizer service-web` | Generate web dashboard service | Persistent web monitoring, NPX path detection |
+| `synqchronizer status` | Show service status and logs | Color-coded status, recent logs, helpful commands |
+| `synqchronizer web` | Start web dashboard | Performance metrics, QoS monitoring, API docs |
+| `synqchronizer install-docker` | Auto-install Docker (Linux) | Multi-distro support, service configuration |
+| `synqchronizer fix-docker` | Fix Docker permissions | User group management, permission troubleshooting |
+| `synqchronizer test-platform` | Test Docker compatibility | Platform testing, architecture validation |
+
+## Web Dashboard
+
+The comprehensive web dashboard provides real-time monitoring and system insights:
 
 ```bash
+synqchronizer web
+```
+
+### 🎨 Dashboard Features
+
+#### 📊 Performance Metrics
+- **Total Traffic**: Cumulative data transfer with smart formatting (KB/MB/GB)
+- **Active Sessions**: Real-time session count monitoring
+- **Traffic Rates**: Live in/out traffic with bytes per second
+- **User Count**: Connected users tracking
+- **Smart Data**: Metrics reflect actual service status
+
+#### 🎯 Quality of Service (QoS)
+- **Overall Score**: Circular progress indicator with color coding
+  - 🟢 **Excellent** (80%+): Green indicator for optimal performance
+  - 🟡 **Good** (60-79%): Yellow indicator for acceptable performance  
+  - 🔴 **Poor** (<60%): Red indicator requiring attention
+- **Individual Metrics**:
+  - **Reliability**: Service stability percentage
+  - **Availability**: Uptime and accessibility percentage
+  - **Efficiency**: Performance optimization score
+
+#### 🔗 API Endpoints Documentation
+- **Method Badges**: Clear GET/POST indicators
+- **Endpoint Paths**: Monospace formatting for clarity
+- **Descriptions**: Detailed functionality explanations
+- **Live Links**: Direct access to API endpoints
+
+#### ⚙️ System Information
+- **Service Status**: Real-time running/stopped/failed indicators
+- **Configuration Display**: Masked Synq key with click-to-reveal
+- **Platform Details**: Architecture and hostname information
+- **Quick Actions**: One-click access to common operations
+
+### 🌐 Server Architecture
+
+The web dashboard runs on dual servers:
+- **Dashboard Server** (default port 3000): Main web interface
+- **Metrics Server** (default port 3001): JSON API endpoints
+
+*Automatic port detection prevents conflicts*
+
+### 📡 API Endpoints
+
+#### Dashboard API (Port 3000)
+- `GET /` - Main dashboard interface
+- `GET /api/status` - System and service status JSON
+- `GET /api/logs` - Recent systemd logs JSON  
+- `GET /api/performance` - Performance metrics and QoS data
+- `POST /api/install-web-service` - Generate web dashboard systemd service
+
+#### Metrics API (Port 3001)
+- `GET /metrics` - Comprehensive system metrics JSON
+- `GET /health` - Health check endpoint for monitoring
+
+## Docker Management
+
+### Automatic Installation
+
+If Docker is not installed, synqchronizer offers automatic installation:
+
+```bash
+synqchronizer install-docker
+```
+
+**Supported Linux distributions:**
+- **Ubuntu/Debian**: APT package management with GPG key verification
+- **CentOS/RHEL/Fedora**: YUM/DNF package management
+- **Automatic service setup**: Docker daemon start and enable
+- **User group management**: Automatic docker group addition
+
+### Permission Management
+
+Fix Docker permission issues automatically:
+
+```bash
+synqchronizer fix-docker
+```
+
+This command:
+- Adds your user to the docker group
+- Provides logout/login instructions
+- Offers testing commands for verification
+
+### Platform Compatibility
+
+Test Docker platform compatibility across architectures:
+
+```bash
+synqchronizer test-platform
+```
+
+**Testing includes:**
+- `linux/amd64` compatibility testing
+- `linux/arm64` compatibility testing  
+- Platform recommendation based on system architecture
+- Comprehensive error reporting and troubleshooting
+
+## Systemd Service Management
+
+### Synchronizer Service
+
+Generate and install the main synchronizer service:
+
+```bash
+synqchronizer service
 sudo cp ~/.synqchronizer/synqchronizer.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable synqchronizer
 sudo systemctl start synqchronizer
 ```
+
+### Web Dashboard Service
+
+Generate a persistent web dashboard service:
+
+```bash
+synqchronizer service-web
+sudo cp ~/.synqchronizer/synqchronizer-web.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable synqchronizer-web
+sudo systemctl start synqchronizer-web
+```
+
+**Features:**
+- **Dynamic NPX Detection**: Automatically finds npm/npx installation path
+- **Path Verification**: Tests multiple common installation locations
+- **Fallback Support**: Handles various Node.js installation methods (nvm, homebrew, etc.)
+
+## Configuration
+
+Configuration is stored in `~/.synqchronizer/config.json`:
+
+```json
+{
+  "userName": "optional-sync-name",
+  "key": "your-synq-key",
+  "wallet": "your-wallet-address", 
+  "secret": "generated-secret",
+  "hostname": "system-hostname",
+  "syncHash": "generated-sync-hash",
+  "depin": "wss://api.multisynq.io/depin",
+  "launcher": "cli"
+}
+```
+
+## Enhanced CLI Experience
+
+### Comprehensive Help Output
+
+Run `synqchronizer --help` for detailed feature information:
+- 🎯 **Feature highlights** with emoji indicators
+- 🌐 **Web dashboard capabilities** overview
+- 🔧 **Troubleshooting features** summary
+- 📦 **Package information** with links
+- 🔗 **Homepage and issues** direct links
+
+### Smart Error Handling
+
+- **Docker not found**: Automatic installation prompts
+- **Permission denied**: Clear fix instructions with commands
+- **Platform mismatch**: Architecture-specific troubleshooting
+- **Service failures**: Detailed error analysis and solutions
+
+## Troubleshooting Guide
+
+### Common Issues & Solutions
+
+#### Docker Installation Issues
+```bash
+# Auto-install Docker (Linux only)
+synqchronizer install-docker
+
+# Manual installation check
+docker --version
+```
+
+#### Permission Problems
+```bash
+# Fix Docker permissions
+synqchronizer fix-docker
+
+# Verify after logout/login
+docker run hello-world
+```
+
+#### Platform Architecture Issues
+```bash
+# Test platform compatibility
+synqchronizer test-platform
+
+# Check system architecture
+uname -m
+```
+
+#### Service Status Problems
+```bash
+# Check detailed service status
+synqchronizer status
+
+# View live logs
+journalctl -u synqchronizer -f
+```
+
+#### NPX/Node.js Issues
+```bash
+# Check NPX detection
+synqchronizer service-web
+
+# Verify Node.js installation
+node --version
+npm --version
+```
+
+## Platform Support Matrix
+
+| Platform | Docker Install | Permission Fix | Service Generation | Web Dashboard | Architecture |
+|----------|----------------|----------------|-------------------|---------------|--------------|
+| **Ubuntu/Debian** | ✅ Auto | ✅ Auto | ✅ Full | ✅ Full | AMD64/ARM64 |
+| **CentOS/RHEL** | ✅ Auto | ✅ Auto | ✅ Full | ✅ Full | AMD64/ARM64 |
+| **Fedora** | ✅ Auto | ✅ Auto | ✅ Full | ✅ Full | AMD64/ARM64 |
+| **macOS** | 📖 Manual | N/A | N/A | ✅ Full | AMD64/ARM64 |
+| **Windows** | 📖 Manual | N/A | N/A | ✅ Full | AMD64 |
+
+## Performance & Monitoring
+
+### Real-time Metrics
+- **Traffic Monitoring**: Bytes transferred with smart formatting
+- **Session Tracking**: Active connection monitoring  
+- **User Analytics**: Connected user statistics
+- **QoS Scoring**: Automated quality assessment
+
+### Health Monitoring
+- **Service Status**: Running/stopped/failed detection
+- **Docker Health**: Container and daemon status
+- **System Resources**: Memory, CPU, and load monitoring
+- **Uptime Tracking**: Service availability metrics
+
+## Security Features
+
+- **Masked Credentials**: Synq keys hidden by default with click-to-reveal
+- **Secure Storage**: Configuration stored in user home directory
+- **Permission Validation**: Docker access verification
+- **Service Isolation**: Systemd service runs with user permissions
+
+## Development & Contributing
+
+### Package Information
+- **Size**: ~16KB package, ~65KB unpacked
+- **Dependencies**: Minimal (chalk, commander, inquirer, express)
+- **Node.js**: Compatible with v10+
+- **License**: MIT
+
+### Contributing
+- **Issues**: Report bugs and feature requests on [GitHub](https://github.com/ceedeepee/synqchronizer/issues)
+- **Pull Requests**: Contributions welcome
+- **Documentation**: Help improve this README
+
+## License
+
+MIT © [ceedeepee](https://github.com/ceedeepee)
+
+---
+
+**Latest Version**: Check [npm](https://www.npmjs.com/package/synqchronizer) for the most recent release with new features and improvements.

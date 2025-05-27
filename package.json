@@ -1,33 +1,59 @@
 {
   "name": "synqchronizer",
-  "version": "1.0.0",
-  "description": "CLI wrapper for launching and managing Multisynq synchronizer Docker containers",
+  "version": "1.6.0",
+  "description": "Complete CLI toolkit for Multisynq Synchronizer - Docker container management, auto-installation, and systemd service generation with built-in troubleshooting",
   "bin": {
     "synqchronize": "./index.js"
   },
-  "author": "Your Name",
+  "author": "ceedeepee",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/ceedeepee/synqchronizer.git"
+  },
+  "homepage": "https://github.com/ceedeepee/synqchronizer#readme",
+  "bugs": {
+    "url": "https://github.com/ceedeepee/synqchronizer/issues"
   },
   "keywords": [
     "multisynq",
     "synchronizer",
     "docker",
     "cli",
-    "depin"
+    "depin",
+    "blockchain",
+    "automation",
+    "systemd",
+    "container",
+    "installer",
+    "troubleshooting",
+    "permissions",
+    "ubuntu",
+    "debian",
+    "centos",
+    "fedora",
+    "linux"
   ],
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=10.0.0"
   },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "preferGlobal": true,
   "dependencies": {
-    "chalk": "^5.0.0",
-    "commander": "^11.0.0",
-    "inquirer": "^9.0.0"
+    "chalk": "^4.1.2",
+    "commander": "^8.3.0",
+    "inquirer": "^7.3.3",
+    "express": "^4.18.2"
   },
   "files": [
     "index.js",
     "README.md"
-  ]
+  ],
+  "scripts": {
+    "test": "node index.js --help"
+  }
 }
