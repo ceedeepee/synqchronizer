@@ -1,15 +1,15 @@
 {
   "name": "synchronizer-cli",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Complete CLI toolkit for Multisynq Synchronizer - Docker container management, persistent wallet lifetime points tracking, password-protected dashboard, auto-installation, and systemd service generation with built-in troubleshooting",
   "bin": {
-    "synchronize": "index.js"
+    "synchronize": "./index.js"
   },
   "author": "ceedeepee",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/multisynq/synchronizer-cli.git"
+    "url": "https://github.com/multisynq/synchronizer-cli.git"
   },
   "homepage": "https://github.com/multisynq/synchronizer-cli#readme",
   "bugs": {
