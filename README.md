@@ -228,6 +228,26 @@ Configuration is stored in `~/.synchronizer-cli/config.json`:
 }
 ```
 
+## Version Information
+
+The synchronizer-cli ecosystem uses several versioned components:
+
+| Component | Version | Description |
+|-----------|---------|-------------|
+| **synchronizer-cli** | 2.0.4 | The npm package version of this CLI tool |
+| **Croquet** | 2.0.1 | The version of Croquet used in the Docker image |
+| **Docker Image** | latest | The cdrakep/synqchronizer Docker image tag |
+| **Launcher ID** | cli-2.0.1 | The launcher identifier used for the Croquet session |
+
+When using the CLI, the launcher ID is automatically set to match the Croquet version (e.g., `cli-2.0.1`) to ensure session compatibility. The Docker image is configured to use the correct Croquet version internally.
+
+### Version History
+
+- **2.0.4**: Added intelligent Docker image update checking to avoid unnecessary downloads
+- **2.0.3**: Fixed Docker image to use Croquet 2.0.1 and added version identification in launcher ID
+- **2.0.2**: Added multi-architecture Docker image support (ARM64/AMD64)
+- **2.0.1**: Initial stable release with web dashboard
+
 ## Enhanced CLI Experience
 
 ### Comprehensive Help Output
