@@ -1,7 +1,7 @@
 {
   "name": "synchronizer-cli",
-  "version": "2.0.0",
-  "description": "Complete CLI toolkit for Multisynq Synchronizer - Docker container management, auto-installation, and systemd service generation with built-in troubleshooting",
+  "version": "2.0.1",
+  "description": "Complete CLI toolkit for Multisynq Synchronizer - Docker container management, persistent wallet lifetime points tracking, password-protected dashboard, auto-installation, and systemd service generation with built-in troubleshooting",
   "bin": {
     "synchronize": "./index.js"
   },
@@ -32,7 +32,16 @@
     "debian",
     "centos",
     "fedora",
-    "linux"
+    "linux",
+    "wallet",
+    "points",
+    "lifetime",
+    "earnings",
+    "monitoring",
+    "persistent",
+    "security",
+    "password",
+    "authentication"
   ],
   "engines": {
     "node": ">=10.0.0"

@@ -1,11 +1,11 @@
-# synchronizer-cli
+# synqchronizer
 
 🚀 **Complete CLI toolkit for Multisynq Synchronizer** - Docker container management, auto-installation, systemd service generation, and real-time web dashboard with performance monitoring.
 
-[![npm version](https://badge.fury.io/js/synchronizer-cli.svg)](https://www.npmjs.com/package/synchronizer-cli)
-[![Node.js Version](https://img.shields.io/node/v/synchronizer-cli.svg)](https://nodejs.org/)
+[![npm version](https://badge.fury.io/js/synqchronizer.svg)](https://www.npmjs.com/package/synqchronizer)
+[![Node.js Version](https://img.shields.io/node/v/synqchronizer.svg)](https://nodejs.org/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Downloads](https://img.shields.io/npm/dm/synchronizer-cli.svg)](https://www.npmjs.com/package/synchronizer-cli)
+[![Downloads](https://img.shields.io/npm/dm/synqchronizer.svg)](https://www.npmjs.com/package/synqchronizer)
 
 ## ✨ Features
 
@@ -41,7 +41,7 @@
 ## Installation
 
 ```bash
-npm install -g synchronizer-cli
+npm install -g synqchronizer
 ```
 
 ## Quick Start
@@ -141,7 +141,7 @@ The web dashboard runs on dual servers:
 
 ### Automatic Installation
 
-If Docker is not installed, synchronizer-cli offers automatic installation:
+If Docker is not installed, synqchronizer offers automatic installation:
 
 ```bash
 synchronize install-docker
@@ -336,7 +336,7 @@ npm --version
 - **License**: Apache-2.0
 
 ### Contributing
-- **Issues**: Report bugs and feature requests on [GitHub](https://github.com/multisynq/synchronizer-cli/issues)
+- **Issues**: Report bugs and feature requests on [GitHub](https://github.com/ceedeepee/synqchronizer/issues)
 - **Pull Requests**: Contributions welcome
 - **Documentation**: Help improve this README
 
@@ -346,4 +346,4 @@ Apache-2.0 © [ceedeepee](https://github.com/ceedeepee)
 
 ---
 
-**Latest Version**: Check [npm](https://www.npmjs.com/package/synchronizer-cli) for the most recent release with new features and improvements.
+**Latest Version**: Check [npm](https://www.npmjs.com/package/synqchronizer) for the most recent release with new features and improvements.
