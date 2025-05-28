@@ -1,6 +1,6 @@
 {
   "name": "synqchronizer",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "Complete CLI toolkit for Multisynq Synchronizer - Docker container management, auto-installation, and systemd service generation with built-in troubleshooting",
   "bin": {
     "synqchronize": "./index.js"
@@ -9,11 +9,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ceedeepee/synqchronizer.git"
+    "url": "https://github.com/multisynq/synchronizer-cli.git"
   },
-  "homepage": "https://github.com/ceedeepee/synqchronizer#readme",
+  "homepage": "https://github.com/multisynq/synchronizer-cli#readme",
   "bugs": {
-    "url": "https://github.com/ceedeepee/synqchronizer/issues"
+    "url": "https://github.com/multisynq/synchronizer-cli/issues"
   },
   "keywords": [
     "multisynq",

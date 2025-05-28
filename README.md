@@ -336,7 +336,7 @@ npm --version
 - **License**: Apache-2.0
 
 ### Contributing
-- **Issues**: Report bugs and feature requests on [GitHub](https://github.com/ceedeepee/synqchronizer/issues)
+- **Issues**: Report bugs and feature requests on [GitHub](https://github.com/multisynq/synchronizer-cli/issues)
 - **Pull Requests**: Contributions welcome
 - **Documentation**: Help improve this README
 
