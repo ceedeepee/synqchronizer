@@ -1,0 +1,44 @@
+# Development files
+node_modules/
+*.log
+.DS_Store
+.env
+.env.*
+
+# Test files
+test/
+*.test.js
+*.spec.js
+
+# Build artifacts
+dist/
+build/
+
+# Config files that might contain secrets
+.synqchronizer/
+.synchronizer-cli/
+config.json
+
+# Version control
+.git/
+.gitignore
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+
+# Lock files (optional - some prefer to include package-lock.json)
+# package-lock.json
+
+# Documentation and development tools
+COMMAND_FIX_SUMMARY.md
+DEPLOYMENT_CHECKLIST.md
+DEPLOYMENT_SUMMARY.md
+pre-publish-check.js
+security-scan.sh
+LICENSE 

@@ -69,7 +69,7 @@ function authenticateRequest(req, res, next) {
   const auth = req.headers.authorization;
   
   if (!auth || !auth.startsWith('Basic ')) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="Synqchronizer Dashboard"');
+    res.setHeader('WWW-Authenticate', 'Basic realm="Synchronizer Dashboard"');
     res.status(401).send('Authentication required');
     return;
   }
@@ -83,7 +83,7 @@ function authenticateRequest(req, res, next) {
     return next();
   }
   
-  res.setHeader('WWW-Authenticate', 'Basic realm="Synqchronizer Dashboard"');
+  res.setHeader('WWW-Authenticate', 'Basic realm="Synchronizer Dashboard"');
   res.status(401).send('Invalid credentials');
 }
 
@@ -390,13 +390,30 @@ async function start() {
 
   console.log(chalk.blue(`Detected platform: ${platform}/${arch} -> Using Docker platform: ${dockerPlatform}`));
 
+  // Set launcher with version matching Croquet version in Docker (2.0.1)
+  const launcherWithVersion = `cli-2.0.1`;
+  console.log(chalk.cyan(`Using launcher identifier: ${launcherWithVersion}`));
+
+  // Pull the latest image before running
+  console.log(chalk.cyan('Ensuring latest Docker image is used...'));
+  try {
+    execSync('docker pull cdrakep/synqchronizer:latest', { 
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    console.log(chalk.green('✅ Latest Docker image pulled successfully'));
+  } catch (error) {
+    console.log(chalk.yellow('⚠️  Could not pull latest image - will use local cache if available'));
+    console.log(chalk.gray(error.message));
+  }
+
   const args = [
     'run', '--rm', '--name', 'synchronizer-cli',
+    '--pull', 'always', // Always try to pull the latest image
     '--platform', dockerPlatform,
     'cdrakep/synqchronizer:latest',
     '--depin', config.depin || 'wss://api.multisynq.io/depin',
     '--sync-name', syncName,
-    '--launcher', config.launcher || 'cli',
+    '--launcher', launcherWithVersion, // Use versioned launcher
     '--key', config.key,
     ...(config.wallet ? ['--wallet', config.wallet] : []),
     ...(config.account ? ['--account', config.account] : [])
@@ -505,14 +522,19 @@ async function installService() {
   const pathDirs = systemPaths.includes(dockerDir) ? systemPaths : [dockerDir, ...systemPaths];
   const pathEnv = pathDirs.join(':');
 
+  // Set launcher with version matching Croquet version in Docker (2.0.1)
+  const launcherWithVersion = `cli-2.0.1`;
+  console.log(chalk.cyan(`Using launcher identifier: ${launcherWithVersion}`));
+
   // Build the exact same command as the start function
   const dockerArgs = [
     'run', '--rm', '--name', 'synchronizer-cli',
+    '--pull', 'always', // Always try to pull the latest image
     '--platform', dockerPlatform,
     'cdrakep/synqchronizer:latest',
     '--depin', config.depin || 'wss://api.multisynq.io/depin',
     '--sync-name', config.syncHash,
-    '--launcher', config.launcher || 'cli',
+    '--launcher', launcherWithVersion,
     '--key', config.key,
     ...(config.wallet ? ['--wallet', config.wallet] : []),
     ...(config.account ? ['--account', config.account] : [])
@@ -540,8 +562,8 @@ WantedBy=multi-user.target
   console.log(chalk.blue(`To install the service, run:
   sudo cp ${serviceFile} /etc/systemd/system/
   sudo systemctl daemon-reload
-  sudo systemctl enable synqchronizer-cli
-  sudo systemctl start synqchronizer-cli`));
+  sudo systemctl enable synchronizer-cli
+  sudo systemctl start synchronizer-cli`));
   
   console.log(chalk.cyan('\n📋 Service will run with the following configuration:'));
   console.log(chalk.gray(`Platform: ${dockerPlatform}`));
@@ -659,12 +681,12 @@ async function testPlatform() {
 }
 
 async function showStatus() {
-  console.log(chalk.blue('🔍 Synqchronizer Service Status'));
+  console.log(chalk.blue('🔍 synchronizer Service Status'));
   console.log(chalk.yellow('Checking systemd service status...\n'));
 
   try {
     // Check if service file exists
-    const serviceExists = fs.existsSync('/etc/systemd/system/synqchronizer-cli.service');
+    const serviceExists = fs.existsSync('/etc/systemd/system/synchronizer-cli.service');
     
     if (!serviceExists) {
       console.log(chalk.yellow('⚠️  Systemd service not installed'));
@@ -672,11 +694,11 @@ async function showStatus() {
       return;
     }
 
-    console.log(chalk.green('✅ Service file exists: /etc/systemd/system/synqchronizer-cli.service'));
+    console.log(chalk.green('✅ Service file exists: /etc/systemd/system/synchronizer-cli.service'));
 
     // Get service status
     try {
-      const statusOutput = execSync('systemctl status synqchronizer-cli --no-pager', { 
+      const statusOutput = execSync('systemctl status synchronizer-cli --no-pager', { 
         encoding: 'utf8',
         stdio: 'pipe'
       });
@@ -714,7 +736,7 @@ async function showStatus() {
     console.log(chalk.gray('─'.repeat(60)));
     
     try {
-      const logsOutput = execSync('journalctl -u synqchronizer-cli --no-pager -n 10', { 
+      const logsOutput = execSync('journalctl -u synchronizer-cli --no-pager -n 10', { 
         encoding: 'utf8',
         stdio: 'pipe'
       });
@@ -751,12 +773,12 @@ async function showStatus() {
 
     // Show helpful commands
     console.log(chalk.blue('\n🛠️  Useful Commands:'));
-    console.log(chalk.gray('  Start service:    sudo systemctl start synqchronizer-cli'));
-    console.log(chalk.gray('  Stop service:     sudo systemctl stop synqchronizer-cli'));
-    console.log(chalk.gray('  Restart service:  sudo systemctl restart synqchronizer-cli'));
-    console.log(chalk.gray('  Enable auto-start: sudo systemctl enable synqchronizer-cli'));
-    console.log(chalk.gray('  View live logs:   journalctl -u synqchronizer-cli -f'));
-    console.log(chalk.gray('  View all logs:    journalctl -u synqchronizer-cli'));
+    console.log(chalk.gray('  Start service:    sudo systemctl start synchronizer-cli'));
+    console.log(chalk.gray('  Stop service:     sudo systemctl stop synchronizer-cli'));
+    console.log(chalk.gray('  Restart service:  sudo systemctl restart synchronizer-cli'));
+    console.log(chalk.gray('  Enable auto-start: sudo systemctl enable synchronizer-cli'));
+    console.log(chalk.gray('  View live logs:   journalctl -u synchronizer-cli -f'));
+    console.log(chalk.gray('  View all logs:    journalctl -u synchronizer-cli'));
 
     // Check if running as manual process
     try {
@@ -780,7 +802,7 @@ async function showStatus() {
 }
 
 async function startWebGUI() {
-  console.log(chalk.blue('🌐 Starting Synqchronizer Web GUI'));
+  console.log(chalk.blue('🌐 Starting synchronizer Web GUI'));
   console.log(chalk.yellow('Setting up web dashboard and metrics endpoints...\n'));
 
   const config = loadConfig();
@@ -935,7 +957,7 @@ function generateDashboardHTML(config, metricsPort, authenticated) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Synqchronizer Dashboard</title>
+    <title>Synchronizer Dashboard</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -1140,7 +1162,7 @@ function generateDashboardHTML(config, metricsPort, authenticated) {
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Synqchronizer Dashboard</h1>
+            <h1>🚀 Synchronizer Dashboard</h1>
             <p>Real-time monitoring and status</p>
         </div>
         
@@ -1565,9 +1587,9 @@ async function getSystemStatus(config) {
   
   // Check systemd service
   try {
-    const serviceExists = fs.existsSync('/etc/systemd/system/synqchronizer-cli.service');
+    const serviceExists = fs.existsSync('/etc/systemd/system/synchronizer-cli.service');
     if (serviceExists) {
-      const statusOutput = execSync('systemctl status synqchronizer-cli --no-pager', { 
+      const statusOutput = execSync('systemctl status synchronizer-cli --no-pager', { 
         encoding: 'utf8',
         stdio: 'pipe'
       });
@@ -1613,7 +1635,7 @@ async function getSystemStatus(config) {
 
 async function getRecentLogs() {
   try {
-    const logsOutput = execSync('journalctl -u synqchronizer-cli --no-pager -n 20 --output=short-iso', { 
+    const logsOutput = execSync('journalctl -u synchronizer-cli --no-pager -n 20 --output=short-iso', { 
       encoding: 'utf8',
       stdio: 'pipe'
     });
@@ -2244,7 +2266,7 @@ async function setDashboardPassword() {
 }
 
 program.name('synchronize')
-  .description(`🚀 Synqchronizer v${packageJson.version} - Complete CLI Toolkit for Multisynq Synchronizer
+  .description(`🚀 Synchronizer v${packageJson.version} - Complete CLI Toolkit for Multisynq Synchronizer
 
 🎯 FEATURES:
   • Docker container management with auto-installation
@@ -2286,7 +2308,7 @@ program.name('synchronize')
   • Platform compatibility testing
   • Comprehensive error handling
 
-📦 Package: synqchronizer@${packageJson.version}
+📦 Package: synchronizer@${packageJson.version}
 🏠 Homepage: ${packageJson.homepage}
 📋 Issues: ${packageJson.bugs.url}`)
   .version(packageJson.version);
