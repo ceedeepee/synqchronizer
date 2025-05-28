@@ -136,6 +136,72 @@ function detectNpxPath() {
   return 'npx';
 }
 
+/**
+ * Check if a new Docker image is available by comparing local and remote digests
+ * @param {string} imageName Docker image name with tag
+ * @returns {Promise<boolean>} True if new image is available or no local image exists
+ */
+async function isNewDockerImageAvailable(imageName) {
+  try {
+    console.log(chalk.gray(`Checking for updates to ${imageName}...`));
+    
+    // First check if we have the image locally
+    const localImageCmd = `docker images --quiet --digests ${imageName}`;
+    let localDigest = '';
+    
+    try {
+      localDigest = execSync(localImageCmd, { encoding: 'utf8', stdio: 'pipe' }).trim();
+      // If there's no local image, the output will be empty
+      if (!localDigest) {
+        console.log(chalk.yellow('No local image found, will pull latest version'));
+        return true;
+      }
+    } catch (error) {
+      // If there's an error checking for the local image, assume we need to pull
+      console.log(chalk.yellow('Unable to check local image, will pull latest version'));
+      return true;
+    }
+    
+    // Now check the remote image digest
+    try {
+      // Need to log in to Docker Hub if the image is private
+      const remoteImageCmd = `docker manifest inspect ${imageName}`;
+      const remoteImageData = execSync(remoteImageCmd, { encoding: 'utf8', stdio: 'pipe' });
+      
+      // Extract the digest from the manifest inspect output
+      const remoteDigestMatch = remoteImageData.match(/"digest":\s*"([^"]+)"/);
+      if (!remoteDigestMatch || !remoteDigestMatch[1]) {
+        console.log(chalk.yellow('Unable to get remote digest, will pull to be safe'));
+        return true;
+      }
+      
+      const remoteDigest = remoteDigestMatch[1];
+      
+      // Extract only the digest part from the local output (format: IMAGE_ID DIGEST)
+      const localDigestParts = localDigest.split(' ');
+      const actualLocalDigest = localDigestParts.length > 1 ? localDigestParts[1] : localDigestParts[0];
+      
+      // Compare digests
+      if (actualLocalDigest && actualLocalDigest.includes(remoteDigest)) {
+        console.log(chalk.green('✅ Using latest Docker image version (no update needed)'));
+        return false;
+      } else {
+        console.log(chalk.blue('🔄 New Docker image version available, will update'));
+        return true;
+      }
+    } catch (error) {
+      // If there's an error checking the remote digest, assume we need to pull
+      console.log(chalk.yellow(`Cannot check for updates: ${error.message}`));
+      console.log(chalk.yellow('Will pull latest version to be safe'));
+      return true;
+    }
+  } catch (error) {
+    // If any unexpected error occurs, be safe and pull the latest
+    console.log(chalk.yellow(`Error checking for image updates: ${error.message}`));
+    return true;
+  }
+}
+
 async function init() {
   const questions = [];
 
@@ -394,16 +460,22 @@ async function start() {
   const launcherWithVersion = `cli-2.0.1`;
   console.log(chalk.cyan(`Using launcher identifier: ${launcherWithVersion}`));
 
-  // Pull the latest image before running
-  console.log(chalk.cyan('Ensuring latest Docker image is used...'));
-  try {
-    execSync('docker pull cdrakep/synqchronizer:latest', { 
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-    console.log(chalk.green('✅ Latest Docker image pulled successfully'));
-  } catch (error) {
-    console.log(chalk.yellow('⚠️  Could not pull latest image - will use local cache if available'));
-    console.log(chalk.gray(error.message));
+  // Check if we need to pull the latest Docker image
+  const imageName = 'cdrakep/synqchronizer:latest';
+  const shouldPull = await isNewDockerImageAvailable(imageName);
+  
+  // Pull the latest image only if necessary
+  if (shouldPull) {
+    console.log(chalk.cyan('Pulling latest Docker image...'));
+    try {
+      execSync(`docker pull ${imageName}`, { 
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      console.log(chalk.green('✅ Docker image pulled successfully'));
+    } catch (error) {
+      console.log(chalk.yellow('⚠️  Could not pull latest image - will use local cache if available'));
+      console.log(chalk.gray(error.message));
+    }
   }
 
   const args = [
@@ -526,6 +598,11 @@ async function installService() {
   const launcherWithVersion = `cli-2.0.1`;
   console.log(chalk.cyan(`Using launcher identifier: ${launcherWithVersion}`));
 
+  // Check if Docker image updates are available (this doesn't actually pull, just informs)
+  const imageName = 'cdrakep/synqchronizer:latest';
+  await isNewDockerImageAvailable(imageName);
+  console.log(chalk.cyan('Service will automatically check for image updates before each run'));
+  
   // Build the exact same command as the start function
   const dockerArgs = [
     'run', '--rm', '--name', 'synchronizer-cli',
