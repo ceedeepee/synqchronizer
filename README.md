@@ -4,7 +4,7 @@
 
 [![npm version](https://badge.fury.io/js/synqchronizer.svg)](https://www.npmjs.com/package/synqchronizer)
 [![Node.js Version](https://img.shields.io/node/v/synqchronizer.svg)](https://nodejs.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Downloads](https://img.shields.io/npm/dm/synqchronizer.svg)](https://www.npmjs.com/package/synqchronizer)
 
 ## ✨ Features
@@ -48,41 +48,41 @@ npm install -g synqchronizer
 
 ```bash
 # 1. Configure your synchronizer
-synqchronizer init
+synqchronize init
 
 # 2. Start the synchronizer
-synqchronizer start
+synqchronize start
 
 # 3. (Optional) Set up as a system service
-synqchronizer service
+synqchronize service
 
 # 4. Check service status and performance
-synqchronizer status
+synqchronize status
 
 # 5. Launch web dashboard with performance monitoring
-synqchronizer web
+synqchronize web
 ```
 
 ## Commands Reference
 
 | Command | Description | Features |
 |---------|-------------|----------|
-| `synqchronizer init` | Interactive configuration setup | Synq key, wallet, sync name configuration |
-| `synqchronizer start` | Run synchronizer Docker container | Auto platform detection, Docker checks |
-| `synqchronizer service` | Generate systemd service file | Headless operation, auto-start configuration |
-| `synqchronizer service-web` | Generate web dashboard service | Persistent web monitoring, NPX path detection |
-| `synqchronizer status` | Show service status and logs | Color-coded status, recent logs, helpful commands |
-| `synqchronizer web` | Start web dashboard | Performance metrics, QoS monitoring, API docs |
-| `synqchronizer install-docker` | Auto-install Docker (Linux) | Multi-distro support, service configuration |
-| `synqchronizer fix-docker` | Fix Docker permissions | User group management, permission troubleshooting |
-| `synqchronizer test-platform` | Test Docker compatibility | Platform testing, architecture validation |
+| `synqchronize init` | Interactive configuration setup | Synq key, wallet, sync name configuration |
+| `synqchronize start` | Run synchronizer Docker container | Auto platform detection, Docker checks |
+| `synqchronize service` | Generate systemd service file | Headless operation, auto-start configuration |
+| `synqchronize service-web` | Generate web dashboard service | Persistent web monitoring, NPX path detection |
+| `synqchronize status` | Show service status and logs | Color-coded status, recent logs, helpful commands |
+| `synqchronize web` | Start web dashboard | Performance metrics, QoS monitoring, API docs |
+| `synqchronize install-docker` | Auto-install Docker (Linux) | Multi-distro support, service configuration |
+| `synqchronize fix-docker` | Fix Docker permissions | User group management, permission troubleshooting |
+| `synqchronize test-platform` | Test Docker compatibility | Platform testing, architecture validation |
 
 ## Web Dashboard
 
 The comprehensive web dashboard provides real-time monitoring and system insights:
 
 ```bash
-synqchronizer web
+synqchronize web
 ```
 
 ### 🎨 Dashboard Features
@@ -144,7 +144,7 @@ The web dashboard runs on dual servers:
 If Docker is not installed, synqchronizer offers automatic installation:
 
 ```bash
-synqchronizer install-docker
+synqchronize install-docker
 ```
 
 **Supported Linux distributions:**
@@ -158,7 +158,7 @@ synqchronizer install-docker
 Fix Docker permission issues automatically:
 
 ```bash
-synqchronizer fix-docker
+synqchronize fix-docker
 ```
 
 This command:
@@ -171,7 +171,7 @@ This command:
 Test Docker platform compatibility across architectures:
 
 ```bash
-synqchronizer test-platform
+synqchronize test-platform
 ```
 
 **Testing includes:**
@@ -187,7 +187,7 @@ synqchronizer test-platform
 Generate and install the main synchronizer service:
 
 ```bash
-synqchronizer service
+synqchronize service
 sudo cp ~/.synqchronizer/synqchronizer.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable synqchronizer
@@ -199,7 +199,7 @@ sudo systemctl start synqchronizer
 Generate a persistent web dashboard service:
 
 ```bash
-synqchronizer service-web
+synqchronize service-web
 sudo cp ~/.synqchronizer/synqchronizer-web.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable synqchronizer-web
@@ -232,7 +232,7 @@ Configuration is stored in `~/.synqchronizer/config.json`:
 
 ### Comprehensive Help Output
 
-Run `synqchronizer --help` for detailed feature information:
+Run `synqchronize --help` for detailed feature information:
 - 🎯 **Feature highlights** with emoji indicators
 - 🌐 **Web dashboard capabilities** overview
 - 🔧 **Troubleshooting features** summary
@@ -253,7 +253,7 @@ Run `synqchronizer --help` for detailed feature information:
 #### Docker Installation Issues
 ```bash
 # Auto-install Docker (Linux only)
-synqchronizer install-docker
+synqchronize install-docker
 
 # Manual installation check
 docker --version
@@ -262,7 +262,7 @@ docker --version
 #### Permission Problems
 ```bash
 # Fix Docker permissions
-synqchronizer fix-docker
+synqchronize fix-docker
 
 # Verify after logout/login
 docker run hello-world
@@ -271,7 +271,7 @@ docker run hello-world
 #### Platform Architecture Issues
 ```bash
 # Test platform compatibility
-synqchronizer test-platform
+synqchronize test-platform
 
 # Check system architecture
 uname -m
@@ -280,7 +280,7 @@ uname -m
 #### Service Status Problems
 ```bash
 # Check detailed service status
-synqchronizer status
+synqchronize status
 
 # View live logs
 journalctl -u synqchronizer -f
@@ -289,7 +289,7 @@ journalctl -u synqchronizer -f
 #### NPX/Node.js Issues
 ```bash
 # Check NPX detection
-synqchronizer service-web
+synqchronize service-web
 
 # Verify Node.js installation
 node --version
@@ -333,7 +333,7 @@ npm --version
 - **Size**: ~16KB package, ~65KB unpacked
 - **Dependencies**: Minimal (chalk, commander, inquirer, express)
 - **Node.js**: Compatible with v10+
-- **License**: MIT
+- **License**: Apache-2.0
 
 ### Contributing
 - **Issues**: Report bugs and feature requests on [GitHub](https://github.com/ceedeepee/synqchronizer/issues)
@@ -342,7 +342,7 @@ npm --version
 
 ## License
 
-MIT © [ceedeepee](https://github.com/ceedeepee)
+Apache-2.0 © [ceedeepee](https://github.com/ceedeepee)
 
 ---
 

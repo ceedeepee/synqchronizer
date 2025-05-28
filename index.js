@@ -1477,7 +1477,7 @@ User=${user}
 Restart=always
 RestartSec=10
 WorkingDirectory=${os.homedir()}
-ExecStart=${npxPath} synqchronizer web
+ExecStart=${npxPath} synqchronize web
 Environment=NODE_ENV=production
 
 [Install]
