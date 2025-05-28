@@ -12,7 +12,7 @@ const express = require('express');
 const packageJson = require('./package.json');
 const program = new Command();
 
-const CONFIG_DIR = path.join(os.homedir(), '.synqchronizer');
+const CONFIG_DIR = path.join(os.homedir(), '.synchronizer-cli');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
 function loadConfig() {
@@ -247,7 +247,7 @@ function showManualInstructions(platform) {
 async function start() {
   const config = loadConfig();
   if (!config.key) {
-    console.error(chalk.red('Missing synq key. Run `synqchronize init` first.'));
+    console.error(chalk.red('Missing synq key. Run `synchronize init` first.'));
     process.exit(1);
   }
 
@@ -302,7 +302,7 @@ async function start() {
   console.log(chalk.blue(`Detected platform: ${platform}/${arch} -> Using Docker platform: ${dockerPlatform}`));
 
   const args = [
-    'run', '--rm', '--name', 'synqchronizer',
+    'run', '--rm', '--name', 'synchronizer-cli',
     '--platform', dockerPlatform,
     'cdrakep/synqchronizer:latest',
     '--depin', config.depin || 'wss://api.multisynq.io/depin',
@@ -336,17 +336,17 @@ async function start() {
       console.error(chalk.white('2. Log out and log back in (or restart your terminal)'));
       console.error(chalk.white('3. Test with: docker run hello-world'));
       console.error(chalk.blue('\n💡 Alternative: Run with sudo (not recommended):'));
-      console.error(chalk.gray('   sudo synqchronize start'));
+      console.error(chalk.gray('   sudo synchronize start'));
       console.error(chalk.blue('\n🔧 Or use the fix command:'));
-      console.error(chalk.gray('   synqchronize fix-docker'));
+      console.error(chalk.gray('   synchronize fix-docker'));
     } else if (code === 125) {
       console.error(chalk.red('❌ Docker container failed to start.'));
       console.error(chalk.yellow('This might be due to platform architecture issues.'));
       console.error(chalk.blue('\n🔧 Troubleshooting steps:'));
       console.error(chalk.gray('1. Test platform compatibility:'));
-      console.error(chalk.gray('   synqchronize test-platform'));
+      console.error(chalk.gray('   synchronize test-platform'));
       console.error(chalk.gray('2. Check Docker logs:'));
-      console.error(chalk.gray('   docker logs synqchronizer'));
+      console.error(chalk.gray('   docker logs synchronizer-cli'));
       console.error(chalk.gray('3. Try running with different platform:'));
       console.error(chalk.gray('   docker run --platform linux/amd64 cdrakep/synqchronizer:latest --help'));
     } else if (code !== 0) {
@@ -363,15 +363,15 @@ async function start() {
 async function installService() {
   const config = loadConfig();
   if (!config.key) {
-    console.error(chalk.red('Missing synq key. Run `synqchronize init` first.'));
+    console.error(chalk.red('Missing synq key. Run `synchronize init` first.'));
     process.exit(1);
   }
   if (!config.wallet && !config.account) {
-    console.error(chalk.red('Missing wallet or account. Run `synqchronize init` first.'));
+    console.error(chalk.red('Missing wallet or account. Run `synchronize init` first.'));
     process.exit(1);
   }
 
-  const serviceFile = path.join(CONFIG_DIR, 'synqchronizer.service');
+  const serviceFile = path.join(CONFIG_DIR, 'synchronizer-cli.service');
   const user = os.userInfo().username;
 
   // Detect platform architecture (same logic as start function)
@@ -391,7 +391,7 @@ async function installService() {
 
   // Build the exact same command as the start function
   const dockerArgs = [
-    'run', '--rm', '--name', 'synqchronizer',
+    'run', '--rm', '--name', 'synchronizer-cli',
     '--platform', dockerPlatform,
     'cdrakep/synqchronizer:latest',
     '--depin', config.depin || 'wss://api.multisynq.io/depin',
@@ -423,8 +423,8 @@ WantedBy=multi-user.target
   console.log(chalk.blue(`To install the service, run:
   sudo cp ${serviceFile} /etc/systemd/system/
   sudo systemctl daemon-reload
-  sudo systemctl enable synqchronizer
-  sudo systemctl start synqchronizer`));
+  sudo systemctl enable synchronizer-cli
+  sudo systemctl start synchronizer-cli`));
   
   console.log(chalk.cyan('\n📋 Service will run with the following configuration:'));
   console.log(chalk.gray(`Platform: ${dockerPlatform}`));
@@ -448,7 +448,7 @@ async function fixDockerPermissions() {
     console.log(chalk.yellow('⚠️  You need to log out and log back in for changes to take effect.'));
     console.log(chalk.blue('\n🧪 To test after logging back in:'));
     console.log(chalk.gray('   docker run hello-world'));
-    console.log(chalk.gray('   synqchronize start'));
+    console.log(chalk.gray('   synchronize start'));
     
   } catch (error) {
     console.error(chalk.red('❌ Failed to add user to docker group.'));
@@ -535,7 +535,7 @@ async function testPlatform() {
     console.log(chalk.gray('4. Contact the image maintainer for multi-arch support'));
   } else {
     console.log(chalk.green(`\n✅ Working platforms: ${workingPlatforms.join(', ')}`));
-    console.log(chalk.gray('synqchronize start will try these platforms automatically'));
+    console.log(chalk.gray('synchronize start will try these platforms automatically'));
   }
 }
 
@@ -545,19 +545,19 @@ async function showStatus() {
 
   try {
     // Check if service file exists
-    const serviceExists = fs.existsSync('/etc/systemd/system/synqchronizer.service');
+    const serviceExists = fs.existsSync('/etc/systemd/system/synchronizer-cli.service');
     
     if (!serviceExists) {
       console.log(chalk.yellow('⚠️  Systemd service not installed'));
-      console.log(chalk.gray('Run `synqchronize service` to generate the service file'));
+      console.log(chalk.gray('Run `synchronize service` to generate the service file'));
       return;
     }
 
-    console.log(chalk.green('✅ Service file exists: /etc/systemd/system/synqchronizer.service'));
+    console.log(chalk.green('✅ Service file exists: /etc/systemd/system/synchronizer-cli.service'));
 
     // Get service status
     try {
-      const statusOutput = execSync('systemctl status synqchronizer --no-pager', { 
+      const statusOutput = execSync('systemctl status synchronizer-cli --no-pager', { 
         encoding: 'utf8',
         stdio: 'pipe'
       });
@@ -595,7 +595,7 @@ async function showStatus() {
     console.log(chalk.gray('─'.repeat(60)));
     
     try {
-      const logsOutput = execSync('journalctl -u synqchronizer --no-pager -n 10', { 
+      const logsOutput = execSync('journalctl -u synchronizer-cli --no-pager -n 10', { 
         encoding: 'utf8',
         stdio: 'pipe'
       });
@@ -632,21 +632,21 @@ async function showStatus() {
 
     // Show helpful commands
     console.log(chalk.blue('\n🛠️  Useful Commands:'));
-    console.log(chalk.gray('  Start service:    sudo systemctl start synqchronizer'));
-    console.log(chalk.gray('  Stop service:     sudo systemctl stop synqchronizer'));
-    console.log(chalk.gray('  Restart service:  sudo systemctl restart synqchronizer'));
-    console.log(chalk.gray('  Enable auto-start: sudo systemctl enable synqchronizer'));
-    console.log(chalk.gray('  View live logs:   journalctl -u synqchronizer -f'));
-    console.log(chalk.gray('  View all logs:    journalctl -u synqchronizer'));
+    console.log(chalk.gray('  Start service:    sudo systemctl start synchronizer-cli'));
+    console.log(chalk.gray('  Stop service:     sudo systemctl stop synchronizer-cli'));
+    console.log(chalk.gray('  Restart service:  sudo systemctl restart synchronizer-cli'));
+    console.log(chalk.gray('  Enable auto-start: sudo systemctl enable synchronizer-cli'));
+    console.log(chalk.gray('  View live logs:   journalctl -u synchronizer-cli -f'));
+    console.log(chalk.gray('  View all logs:    journalctl -u synchronizer-cli'));
 
     // Check if running as manual process
     try {
-      const dockerPs = execSync('docker ps --filter name=synqchronizer --format "table {{.Names}}\\t{{.Status}}"', {
+      const dockerPs = execSync('docker ps --filter name=synchronizer-cli --format "table {{.Names}}\\t{{.Status}}"', {
         encoding: 'utf8',
         stdio: 'pipe'
       });
       
-      if (dockerPs.includes('synqchronizer')) {
+      if (dockerPs.includes('synchronizer-cli')) {
         console.log(chalk.yellow('\n⚠️  Manual synqchronizer process also detected!'));
         console.log(chalk.gray('You may have both service and manual process running'));
         console.log(chalk.gray('Consider stopping one to avoid conflicts'));
@@ -1299,9 +1299,9 @@ async function getSystemStatus(config) {
   
   // Check systemd service
   try {
-    const serviceExists = fs.existsSync('/etc/systemd/system/synqchronizer.service');
+    const serviceExists = fs.existsSync('/etc/systemd/system/synchronizer-cli.service');
     if (serviceExists) {
-      const statusOutput = execSync('systemctl status synqchronizer --no-pager', { 
+      const statusOutput = execSync('systemctl status synchronizer-cli --no-pager', { 
         encoding: 'utf8',
         stdio: 'pipe'
       });
@@ -1333,11 +1333,11 @@ async function getSystemStatus(config) {
   
   // Check if container is running manually
   try {
-    const dockerPs = execSync('docker ps --filter name=synqchronizer --format "{{.Names}}"', {
+    const dockerPs = execSync('docker ps --filter name=synchronizer-cli --format "{{.Names}}"', {
       encoding: 'utf8',
       stdio: 'pipe'
     });
-    status.containerRunning = dockerPs.includes('synqchronizer');
+    status.containerRunning = dockerPs.includes('synchronizer-cli');
   } catch (error) {
     // Docker not available
   }
@@ -1347,7 +1347,7 @@ async function getSystemStatus(config) {
 
 async function getRecentLogs() {
   try {
-    const logsOutput = execSync('journalctl -u synqchronizer --no-pager -n 20 --output=short-iso', { 
+    const logsOutput = execSync('journalctl -u synchronizer-cli --no-pager -n 20 --output=short-iso', { 
       encoding: 'utf8',
       stdio: 'pipe'
     });
@@ -1460,15 +1460,15 @@ async function getPerformanceData(config) {
 async function installWebServiceFile() {
   const config = loadConfig();
   if (!config.key) {
-    throw new Error('Missing synq key. Run `synqchronize init` first.');
+    throw new Error('Missing synq key. Run `synchronize init` first.');
   }
 
-  const serviceFile = path.join(CONFIG_DIR, 'synqchronizer-web.service');
+  const serviceFile = path.join(CONFIG_DIR, 'synchronizer-cli-web.service');
   const user = os.userInfo().username;
   const npxPath = detectNpxPath();
 
   const unit = `[Unit]
-Description=Synqchronizer Web Dashboard
+Description=Synchronizer CLI Web Dashboard
 After=network.target
 
 [Service]
@@ -1477,7 +1477,7 @@ User=${user}
 Restart=always
 RestartSec=10
 WorkingDirectory=${os.homedir()}
-ExecStart=${npxPath} synqchronize web
+ExecStart=${npxPath} synchronize web
 Environment=NODE_ENV=production
 
 [Install]
@@ -1488,8 +1488,8 @@ WantedBy=multi-user.target
   
   const instructions = `sudo cp ${serviceFile} /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable synqchronizer-web
-sudo systemctl start synqchronizer-web`;
+sudo systemctl enable synchronizer-cli-web
+sudo systemctl start synchronizer-cli-web`;
 
   return {
     success: true,
@@ -1500,8 +1500,8 @@ sudo systemctl start synqchronizer-web`;
   };
 }
 
-program.name('synqchronize')
-  .description(`🚀 Synqchronizer v${packageJson.version} - Complete CLI Toolkit for Multisynq Synchronizer
+program.name('synchronize')
+  .description(`🚀 Synchronizer CLI v${packageJson.version} - Complete CLI Toolkit for Multisynq Synchronizer
 
 🎯 FEATURES:
   • Docker container management with auto-installation
@@ -1525,7 +1525,7 @@ program.name('synqchronize')
   • Platform compatibility testing
   • Comprehensive error handling
 
-📦 Package: synqchronizer@${packageJson.version}
+📦 Package: synchronizer-cli@${packageJson.version}
 🏠 Homepage: ${packageJson.homepage}
 📋 Issues: ${packageJson.bugs.url}`)
   .version(packageJson.version);

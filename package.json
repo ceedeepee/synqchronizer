@@ -1,9 +1,9 @@
 {
-  "name": "synqchronizer",
-  "version": "1.6.3",
+  "name": "synchronizer-cli",
+  "version": "2.0.0",
   "description": "Complete CLI toolkit for Multisynq Synchronizer - Docker container management, auto-installation, and systemd service generation with built-in troubleshooting",
   "bin": {
-    "synqchronize": "./index.js"
+    "synchronize": "./index.js"
   },
   "author": "ceedeepee",
   "license": "Apache-2.0",

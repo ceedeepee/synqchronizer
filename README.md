@@ -1,11 +1,11 @@
-# synqchronizer
+# synchronizer-cli
 
 🚀 **Complete CLI toolkit for Multisynq Synchronizer** - Docker container management, auto-installation, systemd service generation, and real-time web dashboard with performance monitoring.
 
-[![npm version](https://badge.fury.io/js/synqchronizer.svg)](https://www.npmjs.com/package/synqchronizer)
-[![Node.js Version](https://img.shields.io/node/v/synqchronizer.svg)](https://nodejs.org/)
+[![npm version](https://badge.fury.io/js/synchronizer-cli.svg)](https://www.npmjs.com/package/synchronizer-cli)
+[![Node.js Version](https://img.shields.io/node/v/synchronizer-cli.svg)](https://nodejs.org/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Downloads](https://img.shields.io/npm/dm/synqchronizer.svg)](https://www.npmjs.com/package/synqchronizer)
+[![Downloads](https://img.shields.io/npm/dm/synchronizer-cli.svg)](https://www.npmjs.com/package/synchronizer-cli)
 
 ## ✨ Features
 
@@ -41,48 +41,48 @@
 ## Installation
 
 ```bash
-npm install -g synqchronizer
+npm install -g synchronizer-cli
 ```
 
 ## Quick Start
 
 ```bash
 # 1. Configure your synchronizer
-synqchronize init
+synchronize init
 
 # 2. Start the synchronizer
-synqchronize start
+synchronize start
 
 # 3. (Optional) Set up as a system service
-synqchronize service
+synchronize service
 
 # 4. Check service status and performance
-synqchronize status
+synchronize status
 
 # 5. Launch web dashboard with performance monitoring
-synqchronize web
+synchronize web
 ```
 
 ## Commands Reference
 
 | Command | Description | Features |
 |---------|-------------|----------|
-| `synqchronize init` | Interactive configuration setup | Synq key, wallet, sync name configuration |
-| `synqchronize start` | Run synchronizer Docker container | Auto platform detection, Docker checks |
-| `synqchronize service` | Generate systemd service file | Headless operation, auto-start configuration |
-| `synqchronize service-web` | Generate web dashboard service | Persistent web monitoring, NPX path detection |
-| `synqchronize status` | Show service status and logs | Color-coded status, recent logs, helpful commands |
-| `synqchronize web` | Start web dashboard | Performance metrics, QoS monitoring, API docs |
-| `synqchronize install-docker` | Auto-install Docker (Linux) | Multi-distro support, service configuration |
-| `synqchronize fix-docker` | Fix Docker permissions | User group management, permission troubleshooting |
-| `synqchronize test-platform` | Test Docker compatibility | Platform testing, architecture validation |
+| `synchronize init` | Interactive configuration setup | Synq key, wallet, sync name configuration |
+| `synchronize start` | Run synchronizer Docker container | Auto platform detection, Docker checks |
+| `synchronize service` | Generate systemd service file | Headless operation, auto-start configuration |
+| `synchronize service-web` | Generate web dashboard service | Persistent web monitoring, NPX path detection |
+| `synchronize status` | Show service status and logs | Color-coded status, recent logs, helpful commands |
+| `synchronize web` | Start web dashboard | Performance metrics, QoS monitoring, API docs |
+| `synchronize install-docker` | Auto-install Docker (Linux) | Multi-distro support, service configuration |
+| `synchronize fix-docker` | Fix Docker permissions | User group management, permission troubleshooting |
+| `synchronize test-platform` | Test Docker compatibility | Platform testing, architecture validation |
 
 ## Web Dashboard
 
 The comprehensive web dashboard provides real-time monitoring and system insights:
 
 ```bash
-synqchronize web
+synchronize web
 ```
 
 ### 🎨 Dashboard Features
@@ -141,10 +141,10 @@ The web dashboard runs on dual servers:
 
 ### Automatic Installation
 
-If Docker is not installed, synqchronizer offers automatic installation:
+If Docker is not installed, synchronizer-cli offers automatic installation:
 
 ```bash
-synqchronize install-docker
+synchronize install-docker
 ```
 
 **Supported Linux distributions:**
@@ -158,7 +158,7 @@ synqchronize install-docker
 Fix Docker permission issues automatically:
 
 ```bash
-synqchronize fix-docker
+synchronize fix-docker
 ```
 
 This command:
@@ -171,7 +171,7 @@ This command:
 Test Docker platform compatibility across architectures:
 
 ```bash
-synqchronize test-platform
+synchronize test-platform
 ```
 
 **Testing includes:**
@@ -187,11 +187,11 @@ synqchronize test-platform
 Generate and install the main synchronizer service:
 
 ```bash
-synqchronize service
-sudo cp ~/.synqchronizer/synqchronizer.service /etc/systemd/system/
+synchronize service
+sudo cp ~/.synchronizer-cli/synchronizer-cli.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable synqchronizer
-sudo systemctl start synqchronizer
+sudo systemctl enable synchronizer-cli
+sudo systemctl start synchronizer-cli
 ```
 
 ### Web Dashboard Service
@@ -199,11 +199,11 @@ sudo systemctl start synqchronizer
 Generate a persistent web dashboard service:
 
 ```bash
-synqchronize service-web
-sudo cp ~/.synqchronizer/synqchronizer-web.service /etc/systemd/system/
+synchronize service-web
+sudo cp ~/.synchronizer-cli/synchronizer-cli-web.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable synqchronizer-web
-sudo systemctl start synqchronizer-web
+sudo systemctl enable synchronizer-cli-web
+sudo systemctl start synchronizer-cli-web
 ```
 
 **Features:**
@@ -213,7 +213,7 @@ sudo systemctl start synqchronizer-web
 
 ## Configuration
 
-Configuration is stored in `~/.synqchronizer/config.json`:
+Configuration is stored in `~/.synchronizer-cli/config.json`:
 
 ```json
 {
@@ -232,7 +232,7 @@ Configuration is stored in `~/.synqchronizer/config.json`:
 
 ### Comprehensive Help Output
 
-Run `synqchronize --help` for detailed feature information:
+Run `synchronize --help` for detailed feature information:
 - 🎯 **Feature highlights** with emoji indicators
 - 🌐 **Web dashboard capabilities** overview
 - 🔧 **Troubleshooting features** summary
@@ -253,7 +253,7 @@ Run `synqchronize --help` for detailed feature information:
 #### Docker Installation Issues
 ```bash
 # Auto-install Docker (Linux only)
-synqchronize install-docker
+synchronize install-docker
 
 # Manual installation check
 docker --version
@@ -262,7 +262,7 @@ docker --version
 #### Permission Problems
 ```bash
 # Fix Docker permissions
-synqchronize fix-docker
+synchronize fix-docker
 
 # Verify after logout/login
 docker run hello-world
@@ -271,7 +271,7 @@ docker run hello-world
 #### Platform Architecture Issues
 ```bash
 # Test platform compatibility
-synqchronize test-platform
+synchronize test-platform
 
 # Check system architecture
 uname -m
@@ -280,16 +280,16 @@ uname -m
 #### Service Status Problems
 ```bash
 # Check detailed service status
-synqchronize status
+synchronize status
 
 # View live logs
-journalctl -u synqchronizer -f
+journalctl -u synchronizer-cli -f
 ```
 
 #### NPX/Node.js Issues
 ```bash
 # Check NPX detection
-synqchronize service-web
+synchronize service-web
 
 # Verify Node.js installation
 node --version
@@ -346,4 +346,4 @@ Apache-2.0 © [ceedeepee](https://github.com/ceedeepee)
 
 ---
 
-**Latest Version**: Check [npm](https://www.npmjs.com/package/synqchronizer) for the most recent release with new features and improvements.
+**Latest Version**: Check [npm](https://www.npmjs.com/package/synchronizer-cli) for the most recent release with new features and improvements.
