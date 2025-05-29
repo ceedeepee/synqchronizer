@@ -971,6 +971,117 @@ async function showStatus() {
   }
 }
 
+/**
+ * Get the primary local IP address, filtering out virtual adapters and loopback interfaces
+ * Works across Windows, Mac, and Linux
+ * @returns {string} The primary local IP address or 'localhost' as fallback
+ */
+function getPrimaryLocalIP() {
+  const interfaces = os.networkInterfaces();
+  
+  // Priority order for interface types (prefer physical over virtual)
+  const interfacePriority = {
+    // Physical interfaces (highest priority)
+    'eth': 100,     // Ethernet (Linux)
+    'en': 90,       // Ethernet (macOS)
+    'Ethernet': 80, // Ethernet (Windows)
+    'Wi-Fi': 70,    // WiFi (Windows)
+    'wlan': 60,     // WiFi (Linux)
+    'wlp': 55,      // WiFi (Linux - newer naming)
+    
+    // Virtual interfaces (lower priority)
+    'docker': 10,   // Docker interfaces
+    'veth': 10,     // Virtual Ethernet
+    'br-': 10,      // Bridge interfaces
+    'virbr': 10,    // Virtual bridge
+    'vmnet': 10,    // VMware
+    'vbox': 10,     // VirtualBox
+    'tun': 10,      // Tunnel interfaces
+    'tap': 10,      // TAP interfaces
+    'utun': 10,     // User tunnel (macOS)
+    'awdl': 10,     // Apple Wireless Direct Link
+    'llw': 10,      // Low Latency WLAN (macOS)
+    'bridge': 10,   // Bridge interfaces
+    'vnic': 10,     // Virtual NIC
+    'Hyper-V': 10,  // Hyper-V (Windows)
+    'VirtualBox': 10, // VirtualBox (Windows)
+    'VMware': 10,   // VMware (Windows)
+    'Loopback': 5,  // Loopback (Windows)
+    'lo': 5         // Loopback (Linux/macOS)
+  };
+  
+  const candidates = [];
+  
+  for (const [interfaceName, addresses] of Object.entries(interfaces)) {
+    // Skip loopback interfaces
+    if (interfaceName === 'lo' || interfaceName.includes('Loopback')) {
+      continue;
+    }
+    
+    for (const addr of addresses) {
+      // Only consider IPv4 addresses that are not internal (loopback)
+      if (addr.family === 'IPv4' && !addr.internal) {
+        // Calculate priority based on interface name
+        let priority = 1; // Default low priority
+        
+        for (const [pattern, score] of Object.entries(interfacePriority)) {
+          if (interfaceName.toLowerCase().startsWith(pattern.toLowerCase()) ||
+              interfaceName.toLowerCase().includes(pattern.toLowerCase())) {
+            priority = score;
+            break;
+          }
+        }
+        
+        // Boost priority for common private network ranges
+        const ip = addr.address;
+        if (ip.startsWith('192.168.') || 
+            ip.startsWith('10.') || 
+            (ip.startsWith('172.') && parseInt(ip.split('.')[1]) >= 16 && parseInt(ip.split('.')[1]) <= 31)) {
+          priority += 20; // Prefer private network IPs
+        }
+        
+        // Penalise virtual/container networks
+        if (interfaceName.toLowerCase().includes('docker') ||
+            interfaceName.toLowerCase().includes('veth') ||
+            interfaceName.toLowerCase().includes('br-') ||
+            interfaceName.toLowerCase().includes('virbr') ||
+            ip.startsWith('172.17.') ||  // Default Docker network
+            ip.startsWith('172.18.') ||  // Docker networks
+            ip.startsWith('172.19.') ||
+            ip.startsWith('172.20.') ||
+            ip.startsWith('169.254.')) { // Link-local
+          priority -= 50;
+        }
+        
+        candidates.push({
+          ip: ip,
+          interface: interfaceName,
+          priority: priority,
+          mac: addr.mac
+        });
+      }
+    }
+  }
+  
+  // Sort by priority (highest first) and return the best candidate
+  candidates.sort((a, b) => b.priority - a.priority);
+  
+  if (candidates.length > 0) {
+    const best = candidates[0];
+    console.log(chalk.gray(`🌐 Detected primary IP: ${best.ip} (${best.interface})`));
+    
+    // Log other candidates for debugging if needed
+    if (candidates.length > 1) {
+      console.log(chalk.gray(`   Other interfaces: ${candidates.slice(1, 3).map(c => `${c.ip} (${c.interface})`).join(', ')}`));
+    }
+    
+    return best.ip;
+  }
+  
+  console.log(chalk.yellow('⚠️  Could not detect primary IP, using localhost'));
+  return 'localhost';
+}
+
 async function startWebGUI() {
   console.log(chalk.blue('🌐 Starting synchronizer Web GUI'));
   console.log(chalk.yellow('Setting up web dashboard and metrics endpoints...\n'));
@@ -982,6 +1093,9 @@ async function startWebGUI() {
   } else {
     console.log(chalk.yellow('⚠️  Dashboard is unprotected - consider setting a password'));
   }
+  
+  // Get the primary local IP address
+  const primaryIP = getPrimaryLocalIP();
   
   // Find available ports with better logging
   console.log(chalk.gray('🔍 Finding available ports...'));
@@ -1004,7 +1118,7 @@ async function startWebGUI() {
   
   // GUI Dashboard
   guiApp.get('/', (req, res) => {
-    const html = generateDashboardHTML(config, metricsPort, req.authenticated);
+    const html = generateDashboardHTML(config, metricsPort, req.authenticated, primaryIP);
     res.send(html);
   });
   
@@ -1049,16 +1163,24 @@ async function startWebGUI() {
   });
   
   // Start servers
-  const guiServer = guiApp.listen(guiPort, () => {
-    console.log(chalk.green(`🎨 Web Dashboard: http://localhost:${guiPort}`));
+  const guiServer = guiApp.listen(guiPort, '0.0.0.0', () => {
+    console.log(chalk.green(`🎨 Web Dashboard: http://${primaryIP}:${guiPort}`));
     if (config.dashboardPassword) {
       console.log(chalk.gray('   Use any username with your configured password to access'));
     }
   });
   
-  const metricsServer = metricsApp.listen(metricsPort, () => {
-    console.log(chalk.green(`📊 Metrics API: http://localhost:${metricsPort}/metrics`));
-    console.log(chalk.green(`❤️  Health Check: http://localhost:${metricsPort}/health`));
+  const metricsServer = metricsApp.listen(metricsPort, '0.0.0.0', () => {
+    console.log(chalk.green(`📊 Metrics API: http://${primaryIP}:${metricsPort}/metrics`));
+    console.log(chalk.green(`❤️  Health Check: http://${primaryIP}:${metricsPort}/health`));
+    
+    // Show local URLs in a separate section if not localhost
+    if (primaryIP !== 'localhost') {
+      console.log(chalk.blue('\n📍 Local Access:'));
+      console.log(chalk.gray(`   Dashboard: http://localhost:${guiPort}`));
+      console.log(chalk.gray(`   Metrics: http://localhost:${metricsPort}/metrics`));
+      console.log(chalk.gray(`   Health: http://localhost:${metricsPort}/health`));
+    }
   });
   
   console.log(chalk.blue('\n🔄 Auto-refresh dashboard every 5 seconds'));
@@ -1115,11 +1237,14 @@ async function findAvailablePort(startPort) {
   });
 }
 
-function generateDashboardHTML(config, metricsPort, authenticated) {
+function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
   // Determine if we should show sensitive data
   const showSensitiveData = !config.dashboardPassword || authenticated;
   const maskedKey = showSensitiveData ? config.key : '••••••••-••••-••••-••••-••••••••••••';
   const maskedWallet = showSensitiveData ? config.wallet : '0x••••••••••••••••••••••••••••••••••••••••';
+  
+  // Use primaryIP for display, fallback to localhost if not provided
+  const displayIP = primaryIP || 'localhost';
   
   return `
 <!DOCTYPE html>
@@ -1434,12 +1559,12 @@ function generateDashboardHTML(config, metricsPort, authenticated) {
                     </div>
                     <div class="api-endpoint">
                         <span class="api-method">GET</span>
-                        <span class="api-path">http://localhost:${metricsPort}/metrics</span>
+                        <span class="api-path">http://${displayIP}:${metricsPort}/metrics</span>
                         <span class="api-desc">Comprehensive system metrics (JSON)</span>
                     </div>
                     <div class="api-endpoint">
                         <span class="api-method">GET</span>
-                        <span class="api-path">http://localhost:${metricsPort}/health</span>
+                        <span class="api-path">http://${displayIP}:${metricsPort}/health</span>
                         <span class="api-desc">Health check endpoint</span>
                     </div>
                 </div>
@@ -1677,16 +1802,14 @@ function generateDashboardHTML(config, metricsPort, authenticated) {
         }
         
         function openMetrics() {
-            // Try common metrics ports
-            const ports = [${metricsPort}, 3002, 3003, 3004, 3005];
-            for (const port of ports) {
-                try {
-                    window.open(\`http://localhost:\${port}/metrics\`, '_blank');
-                    break;
-                } catch (e) {
-                    continue;
-                }
-            }
+            // Try the detected IP first, then fallback to localhost
+            const metricsUrls = [
+                \`http://${displayIP}:${metricsPort}/metrics\`,
+                \`http://localhost:${metricsPort}/metrics\`
+            ];
+            
+            // Open the first URL (primary IP)
+            window.open(metricsUrls[0], '_blank');
         }
         
         function toggleSynqKey() {
