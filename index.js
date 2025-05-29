@@ -10,6 +10,7 @@ const os = require('os');
 const { spawn, execSync } = require('child_process');
 const express = require('express');
 const packageJson = require('./package.json');
+const fetch = require('node-fetch'); // Add node-fetch for API validation
 const program = new Command();
 
 const CONFIG_DIR = path.join(os.homedir(), '.synchronizer-cli');
@@ -202,6 +203,46 @@ async function isNewDockerImageAvailable(imageName) {
   }
 }
 
+/**
+ * Validate synq key format using regex pattern
+ * Checks if the key is a valid UUID v4 format
+ * @param {string} key The synq key to validate
+ * @returns {boolean} True if the key format is valid
+ */
+function validateSynqKeyFormat(key) {
+  return /^[0-9A-F]{8}-[0-9A-F]{4}-[4][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/i.test(key);
+}
+
+/**
+ * Check if a synq key is valid by calling the remote API
+ * @param {string} key The synq key to check
+ * @param {string} nickname Optional nickname for the synchronizer
+ * @returns {Promise<{isValid: boolean, message: string}>} Result object with validation status and message
+ */
+async function validateSynqKeyWithAPI(key, nickname = '') {
+  const DOMAIN = 'multisynq.io';
+  const SYNQ_KEY_URL = `https://api.${DOMAIN}/depin/synchronizers/key`;
+  const url = `${SYNQ_KEY_URL}/${key}/precheck?nickname=${encodeURIComponent(nickname || '')}`;
+  
+  console.log(chalk.gray(`Validating synq key with remote API...`));
+  
+  try {
+    const response = await fetch(url);
+    const keyStatus = await response.text();
+    
+    if (keyStatus === 'ok') {
+      return { isValid: true, message: 'Key is valid and available' };
+    } else {
+      return { isValid: false, message: keyStatus };
+    }
+  } catch (error) {
+    return { 
+      isValid: false, 
+      message: `Could not validate key with API: ${error.message}. Will proceed with local validation only.` 
+    };
+  }
+}
+
 async function init() {
   const questions = [];
 
@@ -216,7 +257,39 @@ async function init() {
     type: 'input',
     name: 'key',
     message: 'Synq key:',
-    validate: input => input ? true : 'Synq key is required',
+    validate: async (input) => {
+      if (!input) return 'Synq key is required';
+      
+      // First validate the format locally
+      if (!validateSynqKeyFormat(input)) {
+        return 'Invalid synq key format. Must be a valid UUID v4 format (XXXXXXXX-XXXX-4XXX-YXXX-XXXXXXXXXXXX where Y is 8, 9, A, or B)';
+      }
+      
+      // If local validation passes, try remote validation
+      try {
+        const nickname = ''; // We don't have the nickname yet, will be empty
+        const validationResult = await validateSynqKeyWithAPI(input, nickname);
+        
+        if (!validationResult.isValid) {
+          // If API returns an error specific to the key, show it
+          if (validationResult.message.includes('Key')) {
+            return validationResult.message;
+          }
+          // For network errors, we'll accept the key if it passed format validation
+          console.log(chalk.yellow(`⚠️  ${validationResult.message}`));
+          console.log(chalk.yellow('Continuing with local validation only.'));
+        } else {
+          console.log(chalk.green('✅ Key validated successfully with API'));
+        }
+        
+        return true;
+      } catch (error) {
+        // If API validation fails for any reason, accept the key if it passed format validation
+        console.log(chalk.yellow(`⚠️  API validation error: ${error.message}`));
+        console.log(chalk.yellow('Continuing with local validation only.'));
+        return true;
+      }
+    }
   });
 
   questions.push({
@@ -2342,6 +2415,62 @@ async function setDashboardPassword() {
   console.log(chalk.gray('Restart the web dashboard for changes to take effect'));
 }
 
+// Add this function before the command definitions
+
+async function validateSynqKey(keyToValidate) {
+  if (!keyToValidate) {
+    // If no key is provided, prompt for one
+    const answer = await inquirer.prompt([{
+      type: 'input',
+      name: 'key',
+      message: 'Enter synq key to validate:',
+      validate: input => input ? true : 'Synq key is required'
+    }]);
+    
+    keyToValidate = answer.key;
+  }
+  
+  console.log(chalk.blue('🔑 Synq Key Validation'));
+  console.log(chalk.gray('Validating synq key format and availability\n'));
+  
+  // First validate the format locally
+  console.log(chalk.cyan('Checking key format...'));
+  const isValidFormat = validateSynqKeyFormat(keyToValidate);
+  
+  if (!isValidFormat) {
+    console.log(chalk.red('❌ Invalid key format'));
+    console.log(chalk.yellow('Key must be in UUID v4 format:'));
+    console.log(chalk.gray('XXXXXXXX-XXXX-4XXX-YXXX-XXXXXXXXXXXX where Y is 8, 9, A, or B'));
+    return;
+  }
+  
+  console.log(chalk.green('✅ Key format is valid'));
+  
+  // If format is valid, check with API
+  console.log(chalk.cyan('\nChecking key with remote API...'));
+  const apiResult = await validateSynqKeyWithAPI(keyToValidate);
+  
+  if (apiResult.isValid) {
+    console.log(chalk.green('✅ Key is valid and available for use'));
+    console.log(chalk.gray(`API Response: ${apiResult.message}`));
+  } else {
+    console.log(chalk.red(`❌ API validation failed: ${apiResult.message}`));
+    
+    // Provide helpful context based on error message
+    if (apiResult.message.includes('does not exist')) {
+      console.log(chalk.yellow('This key does not exist in the system.'));
+    } else if (apiResult.message.includes('in use')) {
+      console.log(chalk.yellow('This key is already being used by another synchronizer.'));
+    } else if (apiResult.message.includes('disabled')) {
+      console.log(chalk.yellow('This key has been disabled by an administrator.'));
+    } else if (apiResult.message.includes('deleted')) {
+      console.log(chalk.yellow('This key has been deleted from the system.'));
+    } else {
+      console.log(chalk.yellow('There was an issue validating this key.'));
+    }
+  }
+}
+
 program.name('synchronize')
   .description(`🚀 Synchronizer v${packageJson.version} - Complete CLI Toolkit for Multisynq Synchronizer
 
@@ -2416,5 +2545,8 @@ program.command('fix-docker').description('Fix Docker permissions (add user to d
 program.command('test-platform').description('Test Docker platform compatibility').action(testPlatform);
 program.command('points').description('Show wallet lifetime points and stats').action(showPoints);
 program.command('set-password').description('Set or change the dashboard password').action(setDashboardPassword);
+program.command('validate-key [key]')
+  .description('Validate a synq key format and check availability with API')
+  .action(validateSynqKey);
 
 program.parse(process.argv);

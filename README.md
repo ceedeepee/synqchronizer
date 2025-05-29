@@ -76,6 +76,9 @@ synchronize web
 | `synchronize install-docker` | Auto-install Docker (Linux) | Multi-distro support, service configuration |
 | `synchronize fix-docker` | Fix Docker permissions | User group management, permission troubleshooting |
 | `synchronize test-platform` | Test Docker compatibility | Platform testing, architecture validation |
+| `synchronize points` | Show wallet lifetime points | Points breakdown, container stats, API status |
+| `synchronize set-password` | Configure dashboard password | Password setting, security management |
+| `synchronize validate-key [key]` | Validate a synq key | Local format check, remote API validation |
 
 ## Web Dashboard
 
@@ -234,7 +237,7 @@ The synchronizer-cli ecosystem uses several versioned components:
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **synchronizer-cli** | 2.0.5 | The npm package version of this CLI tool |
+| **synchronizer-cli** | 2.0.6 | The npm package version of this CLI tool |
 | **Croquet** | 2.0.1 | The version of Croquet used in the Docker image |
 | **Docker Image** | latest | The cdrakep/synqchronizer Docker image tag |
 | **Launcher ID** | cli-2.0.1 | The launcher identifier used for the Croquet session |
@@ -243,6 +246,7 @@ When using the CLI, the launcher ID is automatically set to match the Croquet ve
 
 ### Version History
 
+- **2.0.6**: Added synq key validation with both local format checking and remote API verification
 - **2.0.5**: Added version information to documentation and improved README
 - **2.0.4**: Added intelligent Docker image update checking to avoid unnecessary downloads
 - **2.0.3**: Fixed Docker image to use Croquet 2.0.1 and added version identification in launcher ID
