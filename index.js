@@ -1074,6 +1074,9 @@ async function startWebGUI() {
     console.log(chalk.yellow('⚠️  Dashboard is unprotected - consider setting a password'));
   }
   
+  // Get the primary local IP address
+  const primaryIP = getPrimaryLocalIP();
+  
   // Find available ports with better logging
   console.log(chalk.gray('🔍 Finding available ports...'));
   const guiPort = await findAvailablePort(3000);
@@ -1095,7 +1098,7 @@ async function startWebGUI() {
   
   // GUI Dashboard
   guiApp.get('/', (req, res) => {
-    const html = generateDashboardHTML(config, metricsPort, req.authenticated);
+    const html = generateDashboardHTML(config, metricsPort, req.authenticated, primaryIP);
     res.send(html);
   });
   
