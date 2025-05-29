@@ -571,22 +571,49 @@ async function start() {
     }
   }
 
+  // Create Docker command
+  const dockerCmd = 'docker';
   const args = [
     'run', '--rm', '--name', 'synchronizer-cli',
     '--pull', 'always', // Always try to pull the latest image
     '--platform', dockerPlatform,
-    'cdrakep/synqchronizer:latest',
-    '--depin', config.depin || 'wss://api.multisynq.io/depin',
-    '--sync-name', syncName,
-    '--launcher', launcherWithVersion, // Use versioned launcher
-    '--key', config.key,
-    ...(config.wallet ? ['--wallet', config.wallet] : []),
-    ...(config.account ? ['--account', config.account] : [])
+    imageName
   ];
+  
+  // Add container arguments correctly - each flag and value as separate items
+  if (config.depin) {
+    args.push('--depin');
+    args.push(config.depin);
+  } else {
+    args.push('--depin');
+    args.push('wss://api.multisynq.io/depin');
+  }
+  
+  args.push('--sync-name');
+  args.push(syncName);
+  
+  args.push('--launcher');
+  args.push(launcherWithVersion);
+  
+  args.push('--key');
+  args.push(config.key);
+  
+  if (config.wallet) {
+    args.push('--wallet');
+    args.push(config.wallet);
+  }
+  
+  if (config.account) {
+    args.push('--account');
+    args.push(config.account);
+  }
 
   console.log(chalk.cyan(`Running synchronizer "${syncName}" with wallet ${config.wallet || '[none]'}`));
   
-  const proc = spawn('docker', args, { stdio: 'inherit' });
+  // For debugging
+  console.log(chalk.gray(`Running command: ${dockerCmd} ${args.join(' ')}`));
+  
+  const proc = spawn(dockerCmd, args, { stdio: 'inherit' });
   
   proc.on('error', (err) => {
     if (err.code === 'ENOENT') {
@@ -2769,6 +2796,177 @@ async function fetchWalletLifetimePoints(key, wallet, config = {}) {
   }
 }
 
+/**
+ * Start the nightly test version of the synchronizer with latest Docker image
+ */
+async function startNightly() {
+  const config = loadConfig();
+  if (!config.key) {
+    console.error(chalk.red('Missing synq key. Run `synchronize init` first.'));
+    process.exit(1);
+  }
+
+  if (config.hostname !== os.hostname()) {
+    console.error(chalk.red(`This config was created for ${config.hostname}, not ${os.hostname()}.`));
+    process.exit(1);
+  }
+
+  // Check if Docker is installed
+  if (!checkDocker()) {
+    console.error(chalk.red('Docker is not installed or not accessible.'));
+    
+    const shouldInstall = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'install',
+      message: 'Would you like to install Docker now?',
+      default: true
+    }]);
+
+    if (shouldInstall.install) {
+      await installDocker();
+      
+      // Check again after installation
+      if (!checkDocker()) {
+        console.error(chalk.red('Docker installation may have failed or requires a restart.'));
+        console.error(chalk.yellow('Please try running the command again after restarting your terminal.'));
+        process.exit(1);
+      }
+    } else {
+      console.error(chalk.yellow('Please install Docker first: https://docs.docker.com/get-docker/'));
+      process.exit(1);
+    }
+  }
+  
+  // Generate a unique nightly sync name based on date
+  const nightlyId = `synch-nightly-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+  const syncName = config.syncHash || nightlyId;
+
+  // Detect platform architecture
+  const arch = os.arch();
+  const platform = os.platform();
+  let dockerPlatform = 'linux/amd64'; // Default to amd64
+  
+  if (platform === 'linux') {
+    if (arch === 'arm64' || arch === 'aarch64') {
+      dockerPlatform = 'linux/arm64';
+    } else if (arch === 'x64' || arch === 'x86_64') {
+      dockerPlatform = 'linux/amd64';
+    }
+  } else if (platform === 'darwin') {
+    dockerPlatform = arch === 'arm64' ? 'linux/arm64' : 'linux/amd64';
+  }
+
+  console.log(chalk.blue(`Detected platform: ${platform}/${arch} -> Using Docker platform: ${dockerPlatform}`));
+
+  // Set nightly-specific launcher with Croquet version in Docker (2.0.1)
+  const launcherWithVersion = `nightly-test-2.0.1`;
+  console.log(chalk.cyan(`Using launcher identifier: ${launcherWithVersion}`));
+
+  // Use the FIXED nightly test image
+  const imageName = 'cdrakep/synqchronizer-test-fixed:latest';
+  
+  // Check if we need to pull the latest Docker image
+  const shouldPull = await isNewDockerImageAvailable(imageName);
+  
+  // Pull the latest image only if necessary
+  if (shouldPull) {
+    console.log(chalk.cyan('Pulling latest nightly test image...'));
+    try {
+      execSync(`docker pull ${imageName}`, { 
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      console.log(chalk.green('✅ Nightly test image pulled successfully'));
+    } catch (error) {
+      console.log(chalk.yellow('⚠️  Could not pull latest image - will use local cache if available'));
+      console.log(chalk.gray(error.message));
+    }
+  }
+
+  console.log(chalk.magenta(`🌙 Running FIXED NIGHTLY TEST synchronizer "${syncName}" with wallet ${config.wallet || '[none]'}`));
+  console.log(chalk.yellow(`⚠️  This is a TEST version for development/testing purposes`));
+  console.log(chalk.green(`✅ Using FIXED container image: ${imageName}`));
+
+  try {
+    // Create the shell command with properly escaped arguments
+    const depinArg = config.depin ? config.depin : 'wss://api.multisynq.io/depin';
+    const walletArg = config.wallet ? ` --wallet "${config.wallet}"` : '';
+    const accountArg = config.account ? ` --account "${config.account}"` : '';
+    
+    // Build the command as a single shell command with quotes for values that may contain special characters
+    const shellCommand = `docker run --rm --name synchronizer-nightly --pull always --platform ${dockerPlatform} ${imageName} --depin "${depinArg}" --sync-name "${syncName}" --launcher "${launcherWithVersion}" --key "${config.key}"${walletArg}${accountArg}`;
+    
+    console.log(chalk.gray(`Running command: ${shellCommand}`));
+    
+    // Execute the command directly using child_process.exec
+    const { spawn } = require('child_process');
+    const shell = process.platform === 'win32' ? 'cmd' : '/bin/sh';
+    const shellFlag = process.platform === 'win32' ? '/c' : '-c';
+    
+    const dockerProcess = spawn(shell, [shellFlag, shellCommand], {
+      stdio: 'inherit',
+      windowsHide: true
+    });
+    
+    dockerProcess.on('error', (error) => {
+      console.error(chalk.red(`Error executing command: ${error.message}`));
+      process.exit(1);
+    });
+    
+    dockerProcess.on('exit', (code) => {
+      if (code === 126) {
+        console.error(chalk.red('❌ Docker permission denied.'));
+        console.error(chalk.yellow('This usually means your user is not in the docker group.'));
+        console.error(chalk.blue('\n🔧 To fix this:'));
+        console.error(chalk.white('1. Add your user to the docker group:'));
+        console.error(chalk.gray(`   sudo usermod -aG docker ${os.userInfo().username}`));
+        console.error(chalk.white('2. Log out and log back in (or restart your terminal)'));
+        console.error(chalk.blue('\n🔧 Or use the fix command:'));
+        console.error(chalk.gray('   synchronize fix-docker'));
+      } else if (code === 125) {
+        console.error(chalk.red('❌ Docker container failed to start.'));
+        console.error(chalk.yellow('This might be due to platform architecture issues.'));
+        console.error(chalk.blue('\n🔧 Troubleshooting steps:'));
+        console.error(chalk.gray('1. Test platform compatibility:'));
+        console.error(chalk.gray('   synchronize test-platform'));
+      } else if (code !== 0 && code !== null) {
+        console.error(chalk.red(`Docker process exited with code ${code}`));
+      }
+      process.exit(code || 0);
+    });
+    
+  } catch (error) {
+    console.error(chalk.red(`Error starting Docker container: ${error.message}`));
+    process.exit(1);
+  }
+}
+
+// Add this new function
+async function testNightly() {
+  const config = loadConfig();
+  if (!config.key) {
+    console.error(chalk.red('Missing synq key. Run `synchronize init` first.'));
+    process.exit(1);
+  }
+  
+  const syncName = config.syncHash;
+  console.log(chalk.magenta(`🧪 TEST NIGHTLY - Running NIGHTLY TEST synchronizer "${syncName}" with wallet ${config.wallet || '[none]'}`));
+  console.log(chalk.yellow(`⚠️  This is a direct Docker command execution test`));
+  
+  // Use simple shell execution for testing
+  const shellCommand = `docker run --rm --name synchronizer-nightly --platform linux/$(uname -m | sed 's/x86_64/amd64/' | sed 's/arm64/arm64/') cdrakep/synqchronizer-test:latest --depin wss://api.multisynq.io/depin --sync-name "${syncName}" --launcher nightly-test-2.0.1 --key "${config.key}" ${config.wallet ? `--wallet "${config.wallet}"` : ''}`;
+  
+  console.log(chalk.gray(`Executing: ${shellCommand}`));
+  
+  // Run as direct shell command
+  const child = require('child_process').spawn('/bin/sh', ['-c', shellCommand], {
+    stdio: 'inherit'
+  });
+  
+  child.on('exit', (code) => {
+    process.exit(code || 0);
+  });
+}
+
 program.name('synchronize')
   .description(`🚀 Synchronizer v${packageJson.version} - Complete CLI Toolkit for Multisynq Synchronizer
 
@@ -2846,5 +3044,7 @@ program.command('set-password').description('Set or change the dashboard passwor
 program.command('validate-key [key]')
   .description('Validate a synq key format and check availability with API')
   .action(validateSynqKey);
+program.command('nightly').description('Start synchronizer with latest nightly test Docker image').action(startNightly);
+program.command('test-nightly').description('Test nightly launch with direct Docker command').action(testNightly);
 
 program.parse(process.argv);
