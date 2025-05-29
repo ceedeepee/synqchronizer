@@ -222,7 +222,11 @@ function validateSynqKeyFormat(key) {
 async function validateSynqKeyWithAPI(key, nickname = '') {
   const DOMAIN = 'multisynq.io';
   const SYNQ_KEY_URL = `https://api.${DOMAIN}/depin/synchronizers/key`;
-  const url = `${SYNQ_KEY_URL}/${key}/precheck?nickname=${encodeURIComponent(nickname || '')}`;
+  
+  // If no nickname is provided, use a default one to prevent the "missing synchronizer name" error
+  const syncNickname = nickname || 'cli-validator';
+  
+  const url = `${SYNQ_KEY_URL}/${key}/precheck?nickname=${encodeURIComponent(syncNickname)}`;
   
   console.log(chalk.gray(`Validating synq key with remote API...`));
   
@@ -253,7 +257,12 @@ async function init() {
     default: ''
   });
 
-  questions.push({
+  // Get the userName first
+  const userNameAnswer = await inquirer.prompt([questions[0]]);
+  const userName = userNameAnswer.userName;
+
+  // Then use it when validating the key
+  const keyQuestion = {
     type: 'input',
     name: 'key',
     message: 'Synq key:',
@@ -265,9 +274,10 @@ async function init() {
         return 'Invalid synq key format. Must be a valid UUID v4 format (XXXXXXXX-XXXX-4XXX-YXXX-XXXXXXXXXXXX where Y is 8, 9, A, or B)';
       }
       
-      // If local validation passes, try remote validation
+      // If local validation passes, try remote validation with the userName
       try {
-        const nickname = ''; // We don't have the nickname yet, will be empty
+        // Use the userName or a default nickname
+        const nickname = userName || 'cli-setup';
         const validationResult = await validateSynqKeyWithAPI(input, nickname);
         
         if (!validationResult.isValid) {
@@ -290,23 +300,33 @@ async function init() {
         return true;
       }
     }
-  });
+  };
+  
+  // Add the key question and wallet question
+  const remainingQuestions = [
+    keyQuestion,
+    {
+      type: 'input',
+      name: 'wallet',
+      message: 'Wallet address:',
+      validate: input => input ? true : 'Wallet is required',
+    },
+    {
+      type: 'confirm',
+      name: 'setDashboardPassword',
+      message: 'Set a password for the web dashboard? (Recommended for security):',
+      default: true
+    }
+  ];
 
-  questions.push({
-    type: 'input',
-    name: 'wallet',
-    message: 'Wallet address:',
-    validate: input => input ? true : 'Wallet is required',
-  });
-
-  questions.push({
-    type: 'confirm',
-    name: 'setDashboardPassword',
-    message: 'Set a password for the web dashboard? (Recommended for security):',
-    default: true
-  });
-
-  const answers = await inquirer.prompt(questions);
+  // Get answers for the remaining questions
+  const remainingAnswers = await inquirer.prompt(remainingQuestions);
+  
+  // Combine all answers
+  const answers = {
+    ...userNameAnswer,
+    ...remainingAnswers
+  };
 
   // Ask for password if user wants to set one
   if (answers.setDashboardPassword) {
@@ -1999,7 +2019,7 @@ async function getPointsData(config) {
 
   // First try to get real data from the registry API
   try {
-    const registryData = await fetchWalletLifetimePoints(config.key, config.wallet);
+    const registryData = await fetchWalletLifetimePoints(config.key, config.wallet, config);
     
     if (registryData.success) {
       console.log(chalk.green('✅ Retrieved real wallet lifetime points from registry API'));
@@ -2483,23 +2503,43 @@ async function setDashboardPassword() {
   console.log(chalk.gray('Restart the web dashboard for changes to take effect'));
 }
 
-// Add this function before the command definitions
-
 async function validateSynqKey(keyToValidate) {
+  let nicknameToUse = 'cli-validator'; // Default nickname
+  
+  // If no key is provided, prompt for one
   if (!keyToValidate) {
-    // If no key is provided, prompt for one
+    const answers = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'key',
+        message: 'Enter synq key to validate:',
+        validate: input => input ? true : 'Synq key is required'
+      },
+      {
+        type: 'input',
+        name: 'nickname',
+        message: 'Enter a nickname for validation (optional):',
+        default: nicknameToUse
+      }
+    ]);
+    
+    keyToValidate = answers.key;
+    nicknameToUse = answers.nickname;
+  } else {
+    // If key was provided as argument, prompt only for nickname
     const answer = await inquirer.prompt([{
       type: 'input',
-      name: 'key',
-      message: 'Enter synq key to validate:',
-      validate: input => input ? true : 'Synq key is required'
+      name: 'nickname',
+      message: 'Enter a nickname for validation (optional):',
+      default: nicknameToUse
     }]);
     
-    keyToValidate = answer.key;
+    nicknameToUse = answer.nickname;
   }
   
   console.log(chalk.blue('🔑 Synq Key Validation'));
   console.log(chalk.gray('Validating synq key format and availability\n'));
+  console.log(chalk.gray(`Using nickname: ${nicknameToUse}`));
   
   // First validate the format locally
   console.log(chalk.cyan('Checking key format...'));
@@ -2516,7 +2556,7 @@ async function validateSynqKey(keyToValidate) {
   
   // If format is valid, check with API
   console.log(chalk.cyan('\nChecking key with remote API...'));
-  const apiResult = await validateSynqKeyWithAPI(keyToValidate);
+  const apiResult = await validateSynqKeyWithAPI(keyToValidate, nicknameToUse);
   
   if (apiResult.isValid) {
     console.log(chalk.green('✅ Key is valid and available for use'));
@@ -2546,9 +2586,10 @@ async function validateSynqKey(keyToValidate) {
  * This uses the same approach as the Electron app to get accurate data
  * @param {string} key The synq key
  * @param {string} wallet The wallet address
+ * @param {object} config The full config object with syncHash and userName
  * @returns {Promise<{success: boolean, data?: any, error?: string}>} Result with points data
  */
-async function fetchWalletLifetimePoints(key, wallet) {
+async function fetchWalletLifetimePoints(key, wallet, config = {}) {
   if (!key || !wallet) {
     return { success: false, error: 'Missing key or wallet' };
   }
@@ -2559,8 +2600,11 @@ async function fetchWalletLifetimePoints(key, wallet) {
   try {
     console.log(chalk.gray(`Fetching wallet lifetime points from registry API...`));
     
+    // Use the syncHash or userName as the nickname for validation
+    const nickname = config.syncHash || config.userName || 'cli-validator';
+    
     // First validate the key to ensure it's valid before trying to get points
-    const keyValidation = await validateSynqKeyWithAPI(key);
+    const keyValidation = await validateSynqKeyWithAPI(key, nickname);
     if (!keyValidation.isValid) {
       return { 
         success: false, 
@@ -2575,7 +2619,8 @@ async function fetchWalletLifetimePoints(key, wallet) {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        'X-Synq-Key': key // Use the synq key for authentication
+        'X-Synq-Key': key, // Use the synq key for authentication
+        'X-Synq-Nickname': nickname // Include the nickname in headers
       }
     });
     
