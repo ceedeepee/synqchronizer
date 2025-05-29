@@ -1145,9 +1145,6 @@ async function startWebGUI() {
   // Start servers
   const guiServer = guiApp.listen(guiPort, '0.0.0.0', () => {
     console.log(chalk.green(`🎨 Web Dashboard: http://${primaryIP}:${guiPort}`));
-    if (primaryIP !== 'localhost') {
-      console.log(chalk.gray(`   Local access: http://localhost:${guiPort}`));
-    }
     if (config.dashboardPassword) {
       console.log(chalk.gray('   Use any username with your configured password to access'));
     }
@@ -1156,9 +1153,13 @@ async function startWebGUI() {
   const metricsServer = metricsApp.listen(metricsPort, '0.0.0.0', () => {
     console.log(chalk.green(`📊 Metrics API: http://${primaryIP}:${metricsPort}/metrics`));
     console.log(chalk.green(`❤️  Health Check: http://${primaryIP}:${metricsPort}/health`));
+    
+    // Show local URLs in a separate section if not localhost
     if (primaryIP !== 'localhost') {
-      console.log(chalk.gray(`   Local metrics: http://localhost:${metricsPort}/metrics`));
-      console.log(chalk.gray(`   Local health: http://localhost:${metricsPort}/health`));
+      console.log(chalk.blue('\n📍 Local Access:'));
+      console.log(chalk.gray(`   Dashboard: http://localhost:${guiPort}`));
+      console.log(chalk.gray(`   Metrics: http://localhost:${metricsPort}/metrics`));
+      console.log(chalk.gray(`   Health: http://localhost:${metricsPort}/health`));
     }
   });
   
