@@ -1206,11 +1206,14 @@ async function findAvailablePort(startPort) {
   });
 }
 
-function generateDashboardHTML(config, metricsPort, authenticated) {
+function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
   // Determine if we should show sensitive data
   const showSensitiveData = !config.dashboardPassword || authenticated;
   const maskedKey = showSensitiveData ? config.key : '••••••••-••••-••••-••••-••••••••••••';
   const maskedWallet = showSensitiveData ? config.wallet : '0x••••••••••••••••••••••••••••••••••••••••';
+  
+  // Use primaryIP for display, fallback to localhost if not provided
+  const displayIP = primaryIP || 'localhost';
   
   return `
 <!DOCTYPE html>
@@ -1525,12 +1528,12 @@ function generateDashboardHTML(config, metricsPort, authenticated) {
                     </div>
                     <div class="api-endpoint">
                         <span class="api-method">GET</span>
-                        <span class="api-path">http://localhost:${metricsPort}/metrics</span>
+                        <span class="api-path">http://${displayIP}:${metricsPort}/metrics</span>
                         <span class="api-desc">Comprehensive system metrics (JSON)</span>
                     </div>
                     <div class="api-endpoint">
                         <span class="api-method">GET</span>
-                        <span class="api-path">http://localhost:${metricsPort}/health</span>
+                        <span class="api-path">http://${displayIP}:${metricsPort}/health</span>
                         <span class="api-desc">Health check endpoint</span>
                     </div>
                 </div>
@@ -1768,16 +1771,14 @@ function generateDashboardHTML(config, metricsPort, authenticated) {
         }
         
         function openMetrics() {
-            // Try common metrics ports
-            const ports = [${metricsPort}, 3002, 3003, 3004, 3005];
-            for (const port of ports) {
-                try {
-                    window.open(\`http://localhost:\${port}/metrics\`, '_blank');
-                    break;
-                } catch (e) {
-                    continue;
-                }
-            }
+            // Try the detected IP first, then fallback to localhost
+            const metricsUrls = [
+                \`http://${displayIP}:${metricsPort}/metrics\`,
+                \`http://localhost:${metricsPort}/metrics\`
+            ];
+            
+            // Open the first URL (primary IP)
+            window.open(metricsUrls[0], '_blank');
         }
         
         function toggleSynqKey() {
