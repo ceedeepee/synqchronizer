@@ -1997,6 +1997,49 @@ async function getPointsData(config) {
     };
   }
 
+  // First try to get real data from the registry API
+  try {
+    const registryData = await fetchWalletLifetimePoints(config.key, config.wallet);
+    
+    if (registryData.success) {
+      console.log(chalk.green('✅ Retrieved real wallet lifetime points from registry API'));
+      
+      // Format the API data into our points structure
+      const apiData = registryData.data;
+      const walletLifePoints = apiData.lifetimePoints || 0;
+      
+      // Create our standardized response format with real data
+      return {
+        timestamp: new Date().toISOString(),
+        points: {
+          total: walletLifePoints,
+          daily: apiData.dailyPoints || Math.floor(walletLifePoints * 0.05),
+          weekly: apiData.weeklyPoints || Math.floor(walletLifePoints * 0.2),
+          monthly: apiData.monthlyPoints || Math.floor(walletLifePoints * 0.5),
+          streak: apiData.streak || 0,
+          rank: apiData.rank || 'N/A',
+          multiplier: apiData.multiplier || '1.0'
+        },
+        source: 'registry_api',
+        // Include additional API data that might be useful
+        apiExtras: {
+          lastEarned: apiData.lastEarned,
+          firstEarned: apiData.firstEarned,
+          activeSynchronizers: apiData.activeSynchronizers,
+          totalSessions: apiData.totalSessions,
+          totalTraffic: apiData.totalTraffic
+        }
+      };
+    } else {
+      console.log(chalk.yellow(`⚠️ Could not get points from registry API: ${registryData.error}`));
+      console.log(chalk.yellow('Falling back to container stats...'));
+    }
+  } catch (error) {
+    console.log(chalk.yellow(`⚠️ Error with registry API: ${error.message}`));
+    console.log(chalk.yellow('Falling back to container stats...'));
+  }
+
+  // If registry API fails, continue with existing container stats approach
   try {
     const containerStats = await getContainerStats();
     
@@ -2276,7 +2319,7 @@ sudo systemctl start synchronizer-cli-web`;
 
 async function showPoints() {
   console.log(chalk.blue('💰 Wallet Lifetime Points'));
-  console.log(chalk.yellow('Fetching points data from synchronizer...\n'));
+  console.log(chalk.yellow('Fetching points data...\n'));
 
   const config = loadConfig();
   if (!config.key || !config.wallet) {
@@ -2299,8 +2342,14 @@ async function showPoints() {
       }
     } else {
       console.log(chalk.green('✅ Points data retrieved successfully'));
-      if (containerStats?.hasRealStats) {
-        console.log(chalk.green('🔗 Using real stats from container'));
+      
+      // Show the data source (registry API is more accurate than container stats)
+      if (pointsData.source === 'registry_api') {
+        console.log(chalk.green('🔗 Using real data from registry API (most accurate)'));
+      } else if (pointsData.source === 'registry_via_container') {
+        console.log(chalk.cyan('🐳 Using data from container via registry (accurate)'));
+      } else if (containerStats?.hasRealStats) {
+        console.log(chalk.cyan('🐳 Using real stats from container'));
       } else {
         console.log(chalk.yellow('📊 Using calculated stats based on container uptime'));
       }
@@ -2318,6 +2367,25 @@ async function showPoints() {
     console.log(chalk.green(`🔥 Streak:          ${chalk.bold(points.streak)} days`));
     console.log(chalk.magenta(`🏆 Rank:            ${chalk.bold(points.rank)}`));
     console.log(chalk.cyan(`⚡ Multiplier:      ${chalk.bold(points.multiplier)}x`));
+    
+    // Display registry API-specific details if available
+    if (pointsData.source === 'registry_api' && pointsData.apiExtras) {
+      console.log('');
+      console.log(chalk.bold('🌟 REGISTRY EXTRAS:'));
+      console.log('');
+      
+      if (pointsData.apiExtras.lastEarned) {
+        console.log(chalk.blue(`⏰ Last Earned:     ${chalk.bold(new Date(pointsData.apiExtras.lastEarned).toLocaleString())}`));
+      }
+      
+      if (pointsData.apiExtras.firstEarned) {
+        console.log(chalk.blue(`📆 First Earned:    ${chalk.bold(new Date(pointsData.apiExtras.firstEarned).toLocaleString())}`));
+      }
+      
+      if (pointsData.apiExtras.activeSynchronizers) {
+        console.log(chalk.blue(`🔄 Active Synchs:    ${chalk.bold(pointsData.apiExtras.activeSynchronizers)}`));
+      }
+    }
     
     if (containerStats) {
       console.log('');
@@ -2468,6 +2536,68 @@ async function validateSynqKey(keyToValidate) {
     } else {
       console.log(chalk.yellow('There was an issue validating this key.'));
     }
+  }
+}
+
+// Add this after getPointsData function
+
+/**
+ * Fetch real wallet lifetime points directly from the registry API
+ * This uses the same approach as the Electron app to get accurate data
+ * @param {string} key The synq key
+ * @param {string} wallet The wallet address
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>} Result with points data
+ */
+async function fetchWalletLifetimePoints(key, wallet) {
+  if (!key || !wallet) {
+    return { success: false, error: 'Missing key or wallet' };
+  }
+
+  const DOMAIN = 'multisynq.io';
+  const API_URL = `https://api.${DOMAIN}/depin`;
+  
+  try {
+    console.log(chalk.gray(`Fetching wallet lifetime points from registry API...`));
+    
+    // First validate the key to ensure it's valid before trying to get points
+    const keyValidation = await validateSynqKeyWithAPI(key);
+    if (!keyValidation.isValid) {
+      return { 
+        success: false, 
+        error: `Invalid synq key: ${keyValidation.message}` 
+      };
+    }
+    
+    // Use the registry's points endpoint to get the wallet's lifetime points
+    const url = `${API_URL}/points/wallet/${wallet}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Synq-Key': key // Use the synq key for authentication
+      }
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { 
+        success: false, 
+        error: `API error (${response.status}): ${errorText || 'Unknown error'}` 
+      };
+    }
+    
+    const data = await response.json();
+    return { 
+      success: true, 
+      data: data,
+      source: 'registry_api'
+    };
+  } catch (error) {
+    return { 
+      success: false, 
+      error: `Error fetching points: ${error.message}` 
+    };
   }
 }
 

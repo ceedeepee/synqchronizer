@@ -237,7 +237,7 @@ The synchronizer-cli ecosystem uses several versioned components:
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **synchronizer-cli** | 2.0.6 | The npm package version of this CLI tool |
+| **synchronizer-cli** | 2.0.7 | The npm package version of this CLI tool |
 | **Croquet** | 2.0.1 | The version of Croquet used in the Docker image |
 | **Docker Image** | latest | The cdrakep/synqchronizer Docker image tag |
 | **Launcher ID** | cli-2.0.1 | The launcher identifier used for the Croquet session |
@@ -246,6 +246,7 @@ When using the CLI, the launcher ID is automatically set to match the Croquet ve
 
 ### Version History
 
+- **2.0.7**: Improved lifetime points tracking with direct registry API integration
 - **2.0.6**: Added synq key validation with both local format checking and remote API verification
 - **2.0.5**: Added version information to documentation and improved README
 - **2.0.4**: Added intelligent Docker image update checking to avoid unnecessary downloads
