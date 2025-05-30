@@ -1237,8 +1237,7 @@ async function startWebGUI() {
     try {
       const images = [
         'cdrakep/synqchronizer:latest',
-        'cdrakep/synqchronizer-test-fixed:latest', 
-        'multisynq-org/synchronizer-cli:latest'
+        'cdrakep/synqchronizer-test-fixed:latest'
       ];
       
       const updateStatus = [];
@@ -1285,8 +1284,7 @@ async function startWebGUI() {
       // Security check - only allow known synchronizer images
       const allowedImages = [
         'cdrakep/synqchronizer:latest',
-        'cdrakep/synqchronizer-test-fixed:latest',
-        'multisynq-org/synchronizer-cli:latest'
+        'cdrakep/synqchronizer-test-fixed:latest'
       ];
       
       if (!allowedImages.includes(imageName)) {
@@ -3279,8 +3277,7 @@ async function checkImageUpdates() {
 
   const images = [
     { name: 'cdrakep/synqchronizer:latest', description: 'Main synchronizer image' },
-    { name: 'cdrakep/synqchronizer-test-fixed:latest', description: 'Fixed nightly test image' },
-    { name: 'multisynq-org/synchronizer-cli:latest', description: 'Official CLI image' }
+    { name: 'cdrakep/synqchronizer-test-fixed:latest', description: 'Fixed nightly test image' }
   ];
 
   let updatesAvailable = 0;
@@ -3351,8 +3348,7 @@ async function startImageMonitoring() {
 
   const images = [
     'cdrakep/synqchronizer:latest',
-    'cdrakep/synqchronizer-test-fixed:latest',
-    'multisynq-org/synchronizer-cli:latest'
+    'cdrakep/synqchronizer-test-fixed:latest'
   ];
 
   console.log(chalk.cyan(`📋 Monitoring Configuration:`));
