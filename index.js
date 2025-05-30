@@ -531,6 +531,46 @@ async function start() {
   }
   
   const syncName = config.syncHash;
+  const containerName = 'synchronizer-cli';
+
+  // Check if container is already running
+  try {
+    const runningContainers = execSync(`docker ps --filter name=${containerName} --format "{{.Names}}"`, {
+      encoding: 'utf8',
+      stdio: 'pipe'
+    });
+    
+    if (runningContainers.includes(containerName)) {
+      console.log(chalk.green(`✅ Found existing synchronizer container running`));
+      console.log(chalk.cyan(`🔗 Connecting to logs... (Ctrl+C will stop the container)`));
+      
+      // Connect to the existing container's logs
+      const logProc = spawn('docker', ['logs', '-f', containerName], { stdio: 'inherit' });
+      
+      // Handle Ctrl+C to stop the container
+      const cleanup = () => {
+        console.log(chalk.yellow('\n🛑 Stopping synchronizer container...'));
+        try {
+          execSync(`docker stop ${containerName}`, { stdio: 'pipe' });
+          console.log(chalk.green('✅ Container stopped'));
+        } catch (error) {
+          console.log(chalk.red('❌ Error stopping container:', error.message));
+        }
+        process.exit(0);
+      };
+      
+      process.on('SIGINT', cleanup);
+      process.on('SIGTERM', cleanup);
+      
+      logProc.on('exit', (code) => {
+        process.exit(code);
+      });
+      
+      return;
+    }
+  } catch (error) {
+    // No existing container, continue with normal startup
+  }
 
   // Detect platform architecture
   const arch = os.arch();
@@ -574,7 +614,7 @@ async function start() {
   // Create Docker command
   const dockerCmd = 'docker';
   const args = [
-    'run', '--rm', '--name', 'synchronizer-cli',
+    'run', '--rm', '--name', containerName,
     '--pull', 'always', // Always try to pull the latest image
     '--platform', dockerPlatform,
     imageName
@@ -614,6 +654,21 @@ async function start() {
   console.log(chalk.gray(`Running command: ${dockerCmd} ${args.join(' ')}`));
   
   const proc = spawn(dockerCmd, args, { stdio: 'inherit' });
+  
+  // Handle Ctrl+C to stop the container
+  const cleanup = () => {
+    console.log(chalk.yellow('\n🛑 Stopping synchronizer container...'));
+    try {
+      execSync(`docker stop ${containerName}`, { stdio: 'pipe' });
+      console.log(chalk.green('✅ Container stopped'));
+    } catch (error) {
+      console.log(chalk.red('❌ Error stopping container:', error.message));
+    }
+    process.exit(0);
+  };
+  
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
   
   proc.on('error', (err) => {
     if (err.code === 'ENOENT') {

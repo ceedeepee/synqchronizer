@@ -1,7 +1,7 @@
 {
   "name": "synchronizer-cli",
-  "version": "2.1.0",
-  "description": "Complete CLI toolkit for Multisynq Synchronizer - Production release with versioned Docker containers, automated image update monitoring, persistent wallet lifetime points tracking, password-protected dashboard, auto-installation, and systemd service generation with built-in troubleshooting",
+  "version": "2.1.1",
+  "description": "Complete CLI toolkit for Multisynq Synchronizer - Production release with intelligent container management, automated reconnection, graceful stop handling, versioned Docker containers, automated image update monitoring, persistent wallet lifetime points tracking, password-protected dashboard, auto-installation, and systemd service generation with built-in troubleshooting",
   "bin": {
     "synchronize": "index.js"
   },
