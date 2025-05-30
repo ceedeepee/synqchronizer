@@ -3037,6 +3037,46 @@ async function startNightly() {
   }
   
   const syncName = config.syncHash;
+  const containerName = 'synchronizer-nightly';
+
+  // Check if container is already running
+  try {
+    const runningContainers = execSync(`docker ps --filter name=${containerName} --format "{{.Names}}"`, {
+      encoding: 'utf8',
+      stdio: 'pipe'
+    });
+    
+    if (runningContainers.includes(containerName)) {
+      console.log(chalk.green(`✅ Found existing nightly container running`));
+      console.log(chalk.cyan(`🔗 Connecting to logs... (Ctrl+C will stop the container)`));
+      
+      // Connect to the existing container's logs
+      const logProc = spawn('docker', ['logs', '-f', containerName], { stdio: 'inherit' });
+      
+      // Handle Ctrl+C to stop the container
+      const cleanup = () => {
+        console.log(chalk.yellow('\n🛑 Stopping nightly container...'));
+        try {
+          execSync(`docker stop ${containerName}`, { stdio: 'pipe' });
+          console.log(chalk.green('✅ Container stopped'));
+        } catch (error) {
+          console.log(chalk.red('❌ Error stopping container:', error.message));
+        }
+        process.exit(0);
+      };
+      
+      process.on('SIGINT', cleanup);
+      process.on('SIGTERM', cleanup);
+      
+      logProc.on('exit', (code) => {
+        process.exit(code);
+      });
+      
+      return;
+    }
+  } catch (error) {
+    // No existing container, continue with normal startup
+  }
 
   // Detect platform architecture
   const arch = os.arch();
@@ -3079,14 +3119,14 @@ async function startNightly() {
     }
   }
 
-  console.log(chalk.magenta(`🌙 Running FIXED NIGHTLY TEST synchronizer "${syncName}" with wallet ${config.wallet || '[none]'}`));
+  console.log(chalk.magenta(`🌙 Running NIGHTLY TEST synchronizer "${syncName}" with wallet ${config.wallet || '[none]'}`));
   console.log(chalk.yellow(`⚠️  This is a TEST version for development/testing purposes`));
-  console.log(chalk.green(`✅ Using FIXED container image: ${imageName}`));
+  console.log(chalk.green(`✅ Using container image: ${imageName}`));
 
   // Create Docker command using the same approach as start() function
   const dockerCmd = 'docker';
   const args = [
-    'run', '--rm', '--name', 'synchronizer-nightly',
+    'run', '--rm', '--name', containerName,
     '--pull', 'always', // Always try to pull the latest image
     '--platform', dockerPlatform,
     imageName
@@ -3124,6 +3164,21 @@ async function startNightly() {
   console.log(chalk.gray(`Running command: ${dockerCmd} ${args.join(' ')}`));
   
   const proc = spawn(dockerCmd, args, { stdio: 'inherit' });
+  
+  // Handle Ctrl+C to stop the container
+  const cleanup = () => {
+    console.log(chalk.yellow('\n🛑 Stopping nightly container...'));
+    try {
+      execSync(`docker stop ${containerName}`, { stdio: 'pipe' });
+      console.log(chalk.green('✅ Container stopped'));
+    } catch (error) {
+      console.log(chalk.red('❌ Error stopping container:', error.message));
+    }
+    process.exit(0);
+  };
+  
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
   
   proc.on('error', (err) => {
     if (err.code === 'ENOENT') {
