@@ -1178,6 +1178,77 @@ async function startWebGUI() {
     }
   });
   
+  guiApp.get('/api/check-updates', async (req, res) => {
+    try {
+      const images = [
+        'cdrakep/synqchronizer:latest',
+        'cdrakep/synqchronizer-test-fixed:latest', 
+        'multisynq-org/synchronizer-cli:latest'
+      ];
+      
+      const updateStatus = [];
+      let totalUpdates = 0;
+      
+      for (const imageName of images) {
+        try {
+          const hasUpdate = await isNewDockerImageAvailable(imageName);
+          updateStatus.push({
+            name: imageName,
+            updateAvailable: hasUpdate,
+            checked: true
+          });
+          if (hasUpdate) totalUpdates++;
+        } catch (error) {
+          updateStatus.push({
+            name: imageName,
+            updateAvailable: false,
+            checked: false,
+            error: error.message
+          });
+        }
+      }
+      
+      res.json({
+        success: true,
+        totalUpdates,
+        images: updateStatus,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+  
+  guiApp.post('/api/pull-image', async (req, res) => {
+    try {
+      const { imageName } = req.body;
+      
+      if (!imageName) {
+        return res.json({ success: false, error: 'Image name is required' });
+      }
+      
+      // Security check - only allow known synchronizer images
+      const allowedImages = [
+        'cdrakep/synqchronizer:latest',
+        'cdrakep/synqchronizer-test-fixed:latest',
+        'multisynq-org/synchronizer-cli:latest'
+      ];
+      
+      if (!allowedImages.includes(imageName)) {
+        return res.json({ success: false, error: 'Image not allowed' });
+      }
+      
+      execSync(`docker pull ${imageName}`, { stdio: 'pipe' });
+      res.json({ 
+        success: true, 
+        message: `Successfully pulled ${imageName}`,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+  
   // Metrics endpoint (no auth required for monitoring)
   metricsApp.get('/metrics', async (req, res) => {
     const metrics = await generateMetrics(config);
@@ -1586,6 +1657,16 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                     </div>
                     <div class="api-endpoint">
                         <span class="api-method">GET</span>
+                        <span class="api-path">/api/check-updates</span>
+                        <span class="api-desc">Check for Docker image updates</span>
+                    </div>
+                    <div class="api-endpoint">
+                        <span class="api-method">POST</span>
+                        <span class="api-path">/api/pull-image</span>
+                        <span class="api-desc">Pull latest Docker image (requires imageName in body)</span>
+                    </div>
+                    <div class="api-endpoint">
+                        <span class="api-method">GET</span>
                         <span class="api-path">http://${displayIP}:${metricsPort}/metrics</span>
                         <span class="api-desc">Comprehensive system metrics (JSON)</span>
                     </div>
@@ -1673,6 +1754,23 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                     <div class="metric-label">Uptime:</div>
                     <div class="metric-value">\${status.uptime || 'Unknown'}</div>
                 </div>
+                <div class="metric">
+                    <div class="metric-label">Image Updates:</div>
+                    <div class="metric-value">
+                        \${status.imageUpdates ? 
+                            (status.imageUpdates.available > 0 ? 
+                                \`🔄 \${status.imageUpdates.available} update(s) available\` : 
+                                '✅ All images up to date'
+                            ) : '❔ Check pending'
+                        }
+                    </div>
+                </div>
+                \${status.imageUpdates && status.imageUpdates.lastChecked ? \`
+                <div class="metric">
+                    <div class="metric-label">Last Checked:</div>
+                    <div class="metric-value" style="font-size: 0.9em;">\${new Date(status.imageUpdates.lastChecked).toLocaleTimeString()}</div>
+                </div>
+                \` : ''}
             \`;
             document.getElementById('status-content').innerHTML = statusHtml;
         }
@@ -1894,7 +1992,12 @@ async function getSystemStatus(config) {
     dockerAvailable: false,
     autoStart: false,
     uptime: null,
-    containerRunning: false
+    containerRunning: false,
+    imageUpdates: {
+      available: 0,
+      lastChecked: null,
+      images: []
+    }
   };
   
   // Check Docker
@@ -1948,6 +2051,47 @@ async function getSystemStatus(config) {
     status.containerRunning = dockerPs.includes('synchronizer-cli');
   } catch (error) {
     // Docker not available
+  }
+  
+  // Check Docker image updates (quick check, no pulling)
+  if (status.dockerAvailable) {
+    try {
+      const images = [
+        'cdrakep/synqchronizer:latest',
+        'cdrakep/synqchronizer-test-fixed:latest',
+        'multisynq-org/synchronizer-cli:latest'
+      ];
+      
+      let updatesAvailable = 0;
+      const imageStatuses = [];
+      
+      for (const imageName of images) {
+        try {
+          // Quick check without pulling
+          const hasUpdate = await isNewDockerImageAvailable(imageName);
+          imageStatuses.push({
+            name: imageName,
+            updateAvailable: hasUpdate
+          });
+          if (hasUpdate) updatesAvailable++;
+        } catch (error) {
+          imageStatuses.push({
+            name: imageName,
+            updateAvailable: false,
+            error: error.message
+          });
+        }
+      }
+      
+      status.imageUpdates = {
+        available: updatesAvailable,
+        lastChecked: new Date().toISOString(),
+        images: imageStatuses
+      };
+    } catch (error) {
+      // Image update check failed
+      status.imageUpdates.error = error.message;
+    }
   }
   
   return status;
@@ -2837,9 +2981,7 @@ async function startNightly() {
     }
   }
   
-  // Generate a unique nightly sync name based on date
-  const nightlyId = `synch-nightly-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
-  const syncName = config.syncHash || nightlyId;
+  const syncName = config.syncHash;
 
   // Detect platform architecture
   const arch = os.arch();
@@ -2886,58 +3028,78 @@ async function startNightly() {
   console.log(chalk.yellow(`⚠️  This is a TEST version for development/testing purposes`));
   console.log(chalk.green(`✅ Using FIXED container image: ${imageName}`));
 
-  try {
-    // Create the shell command with properly escaped arguments
-    const depinArg = config.depin ? config.depin : 'wss://api.multisynq.io/depin';
-    const walletArg = config.wallet ? ` --wallet "${config.wallet}"` : '';
-    const accountArg = config.account ? ` --account "${config.account}"` : '';
-    
-    // Build the command as a single shell command with quotes for values that may contain special characters
-    const shellCommand = `docker run --rm --name synchronizer-nightly --pull always --platform ${dockerPlatform} ${imageName} --depin "${depinArg}" --sync-name "${syncName}" --launcher "${launcherWithVersion}" --key "${config.key}"${walletArg}${accountArg}`;
-    
-    console.log(chalk.gray(`Running command: ${shellCommand}`));
-    
-    // Execute the command directly using child_process.exec
-    const { spawn } = require('child_process');
-    const shell = process.platform === 'win32' ? 'cmd' : '/bin/sh';
-    const shellFlag = process.platform === 'win32' ? '/c' : '-c';
-    
-    const dockerProcess = spawn(shell, [shellFlag, shellCommand], {
-      stdio: 'inherit',
-      windowsHide: true
-    });
-    
-    dockerProcess.on('error', (error) => {
-      console.error(chalk.red(`Error executing command: ${error.message}`));
-      process.exit(1);
-    });
-    
-    dockerProcess.on('exit', (code) => {
-      if (code === 126) {
-        console.error(chalk.red('❌ Docker permission denied.'));
-        console.error(chalk.yellow('This usually means your user is not in the docker group.'));
-        console.error(chalk.blue('\n🔧 To fix this:'));
-        console.error(chalk.white('1. Add your user to the docker group:'));
-        console.error(chalk.gray(`   sudo usermod -aG docker ${os.userInfo().username}`));
-        console.error(chalk.white('2. Log out and log back in (or restart your terminal)'));
-        console.error(chalk.blue('\n🔧 Or use the fix command:'));
-        console.error(chalk.gray('   synchronize fix-docker'));
-      } else if (code === 125) {
-        console.error(chalk.red('❌ Docker container failed to start.'));
-        console.error(chalk.yellow('This might be due to platform architecture issues.'));
-        console.error(chalk.blue('\n🔧 Troubleshooting steps:'));
-        console.error(chalk.gray('1. Test platform compatibility:'));
-        console.error(chalk.gray('   synchronize test-platform'));
-      } else if (code !== 0 && code !== null) {
-        console.error(chalk.red(`Docker process exited with code ${code}`));
-      }
-      process.exit(code || 0);
-    });
-    
-  } catch (error) {
-    console.error(chalk.red(`Error starting Docker container: ${error.message}`));
-    process.exit(1);
+  // Create Docker command using the same approach as start() function
+  const dockerCmd = 'docker';
+  const args = [
+    'run', '--rm', '--name', 'synchronizer-nightly',
+    '--pull', 'always', // Always try to pull the latest image
+    '--platform', dockerPlatform,
+    imageName
+  ];
+  
+  // Add container arguments correctly - each flag and value as separate items
+  if (config.depin) {
+    args.push('--depin');
+    args.push(config.depin);
+  } else {
+    args.push('--depin');
+    args.push('wss://api.multisynq.io/depin');
   }
+  
+  args.push('--sync-name');
+  args.push(syncName);
+  
+  args.push('--launcher');
+  args.push(launcherWithVersion);
+  
+  args.push('--key');
+  args.push(config.key);
+  
+  if (config.wallet) {
+    args.push('--wallet');
+    args.push(config.wallet);
+  }
+  
+  if (config.account) {
+    args.push('--account');
+    args.push(config.account);
+  }
+
+  // For debugging
+  console.log(chalk.gray(`Running command: ${dockerCmd} ${args.join(' ')}`));
+  
+  const proc = spawn(dockerCmd, args, { stdio: 'inherit' });
+  
+  proc.on('error', (err) => {
+    if (err.code === 'ENOENT') {
+      console.error(chalk.red('Docker command not found. Please ensure Docker is installed and in your PATH.'));
+    } else {
+      console.error(chalk.red('Error running Docker:'), err.message);
+    }
+    process.exit(1);
+  });
+  
+  proc.on('exit', code => {
+    if (code === 126) {
+      console.error(chalk.red('❌ Docker permission denied.'));
+      console.error(chalk.yellow('This usually means your user is not in the docker group.'));
+      console.error(chalk.blue('\n🔧 To fix this:'));
+      console.error(chalk.white('1. Add your user to the docker group:'));
+      console.error(chalk.gray(`   sudo usermod -aG docker ${os.userInfo().username}`));
+      console.error(chalk.white('2. Log out and log back in (or restart your terminal)'));
+      console.error(chalk.blue('\n🔧 Or use the fix command:'));
+      console.error(chalk.gray('   synchronize fix-docker'));
+    } else if (code === 125) {
+      console.error(chalk.red('❌ Docker container failed to start.'));
+      console.error(chalk.yellow('This might be due to platform architecture issues.'));
+      console.error(chalk.blue('\n🔧 Troubleshooting steps:'));
+      console.error(chalk.gray('1. Test platform compatibility:'));
+      console.error(chalk.gray('   synchronize test-platform'));
+    } else if (code !== 0) {
+      console.error(chalk.red(`Docker process exited with code ${code}`));
+    }
+    process.exit(code);
+  });
 }
 
 // Add this new function
@@ -2967,11 +3129,233 @@ async function testNightly() {
   });
 }
 
+/**
+ * Check for Docker image updates manually
+ */
+async function checkImageUpdates() {
+  console.log(chalk.blue('🔍 Checking for Docker Image Updates'));
+  console.log(chalk.yellow('Checking all synchronizer Docker images...\n'));
+
+  const images = [
+    { name: 'cdrakep/synqchronizer:latest', description: 'Main synchronizer image' },
+    { name: 'cdrakep/synqchronizer-test-fixed:latest', description: 'Fixed nightly test image' },
+    { name: 'multisynq-org/synchronizer-cli:latest', description: 'Official CLI image' }
+  ];
+
+  let updatesAvailable = 0;
+
+  for (const image of images) {
+    console.log(chalk.cyan(`Checking ${image.description}...`));
+    console.log(chalk.gray(`Image: ${image.name}`));
+    
+    try {
+      const hasUpdate = await isNewDockerImageAvailable(image.name);
+      
+      if (hasUpdate) {
+        console.log(chalk.yellow(`🔄 Update available for ${image.name}`));
+        updatesAvailable++;
+        
+        const shouldPull = await inquirer.prompt([{
+          type: 'confirm',
+          name: 'pull',
+          message: `Pull latest version of ${image.name}?`,
+          default: true
+        }]);
+        
+        if (shouldPull.pull) {
+          try {
+            console.log(chalk.cyan(`Pulling ${image.name}...`));
+            execSync(`docker pull ${image.name}`, { stdio: 'inherit' });
+            console.log(chalk.green(`✅ Successfully updated ${image.name}`));
+          } catch (error) {
+            console.log(chalk.red(`❌ Failed to pull ${image.name}: ${error.message}`));
+          }
+        }
+      } else {
+        console.log(chalk.green(`✅ ${image.name} is up to date`));
+      }
+      
+      console.log(''); // Add spacing between images
+    } catch (error) {
+      console.log(chalk.red(`❌ Error checking ${image.name}: ${error.message}`));
+      console.log('');
+    }
+  }
+
+  console.log(chalk.blue('📊 Update Check Summary:'));
+  if (updatesAvailable === 0) {
+    console.log(chalk.green('✅ All images are up to date'));
+  } else {
+    console.log(chalk.yellow(`🔄 ${updatesAvailable} image(s) had updates available`));
+  }
+  
+  console.log(chalk.gray('\n💡 Tip: Use `synchronize monitor` to automatically check for updates'));
+}
+
+/**
+ * Start background monitoring for Docker image updates
+ */
+async function startImageMonitoring() {
+  console.log(chalk.blue('🕐 Starting Docker Image Monitoring'));
+  console.log(chalk.yellow('Background service to check for image updates every 30 minutes\n'));
+
+  const config = loadConfig();
+  
+  // Configuration for monitoring
+  const monitoringConfig = {
+    checkInterval: 30 * 60 * 1000, // 30 minutes in milliseconds
+    autoUpdate: false, // Set to true to automatically pull updates
+    notifyOnly: true   // Just notify, don't auto-update
+  };
+
+  const images = [
+    'cdrakep/synqchronizer:latest',
+    'cdrakep/synqchronizer-test-fixed:latest',
+    'multisynq-org/synchronizer-cli:latest'
+  ];
+
+  console.log(chalk.cyan(`📋 Monitoring Configuration:`));
+  console.log(chalk.gray(`   Check interval: ${monitoringConfig.checkInterval / 60000} minutes`));
+  console.log(chalk.gray(`   Auto-update: ${monitoringConfig.autoUpdate ? 'Enabled' : 'Disabled'}`));
+  console.log(chalk.gray(`   Images: ${images.length} configured`));
+  console.log('');
+
+  let checkCount = 0;
+
+  const performCheck = async () => {
+    checkCount++;
+    const timestamp = new Date().toLocaleString();
+    
+    console.log(chalk.blue(`🔍 Check #${checkCount} at ${timestamp}`));
+    
+    let updatesFound = 0;
+    
+    for (const imageName of images) {
+      try {
+        const hasUpdate = await isNewDockerImageAvailable(imageName);
+        
+        if (hasUpdate) {
+          updatesFound++;
+          console.log(chalk.yellow(`🔄 Update available: ${imageName}`));
+          
+          if (monitoringConfig.autoUpdate) {
+            try {
+              console.log(chalk.cyan(`⬇️ Auto-updating ${imageName}...`));
+              execSync(`docker pull ${imageName}`, { stdio: 'pipe' });
+              console.log(chalk.green(`✅ Auto-updated ${imageName}`));
+            } catch (error) {
+              console.log(chalk.red(`❌ Auto-update failed for ${imageName}: ${error.message}`));
+            }
+          }
+        } else {
+          console.log(chalk.gray(`✅ ${imageName} is up to date`));
+        }
+      } catch (error) {
+        console.log(chalk.red(`❌ Error checking ${imageName}: ${error.message}`));
+      }
+    }
+    
+    if (updatesFound === 0) {
+      console.log(chalk.green(`✅ All ${images.length} images are up to date`));
+    } else {
+      console.log(chalk.yellow(`🔄 Found ${updatesFound} image(s) with updates`));
+      if (!monitoringConfig.autoUpdate) {
+        console.log(chalk.gray('   Run `synchronize check-updates` to update manually'));
+      }
+    }
+    
+    console.log(chalk.gray(`⏰ Next check in ${monitoringConfig.checkInterval / 60000} minutes\n`));
+  };
+
+  // Perform initial check
+  await performCheck();
+
+  // Set up interval for periodic checks
+  const monitoringInterval = setInterval(performCheck, monitoringConfig.checkInterval);
+
+  console.log(chalk.green('🚀 Monitoring started - Press Ctrl+C to stop'));
+  console.log(chalk.gray('Tip: You can safely run this in the background or as a systemd service\n'));
+
+  // Graceful shutdown
+  process.on('SIGINT', () => {
+    console.log(chalk.yellow('\n🛑 Stopping image monitoring...'));
+    clearInterval(monitoringInterval);
+    console.log(chalk.green('✅ Monitoring stopped'));
+    process.exit(0);
+  });
+
+  // Keep the process alive
+  setInterval(() => {
+    // Just keep the monitoring alive
+  }, 1000);
+}
+
+/**
+ * Generate systemd service file for image monitoring
+ */
+async function installImageMonitoringService() {
+  const config = loadConfig();
+  const serviceFile = path.join(CONFIG_DIR, 'synchronizer-cli-monitor.service');
+  const user = os.userInfo().username;
+  const npxPath = detectNpxPath();
+  
+  // Get the directory containing npx for PATH
+  const npxDir = path.dirname(npxPath);
+  
+  // Build PATH environment variable including npx directory
+  const systemPaths = [
+    '/usr/local/sbin',
+    '/usr/local/bin', 
+    '/usr/sbin',
+    '/usr/bin',
+    '/sbin',
+    '/bin'
+  ];
+  
+  // Add npx directory to the beginning of PATH if it's not already a system path
+  const pathDirs = systemPaths.includes(npxDir) ? systemPaths : [npxDir, ...systemPaths];
+  const pathEnv = pathDirs.join(':');
+
+  const unit = `[Unit]
+Description=Synchronizer CLI Docker Image Monitor
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=${user}
+Restart=always
+RestartSec=30
+WorkingDirectory=${os.homedir()}
+ExecStart=${npxPath} synchronize monitor
+Environment=NODE_ENV=production
+Environment=PATH=${pathEnv}
+
+[Install]
+WantedBy=multi-user.target
+`;
+
+  fs.writeFileSync(serviceFile, unit);
+  
+  const instructions = `sudo cp ${serviceFile} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable synchronizer-cli-monitor
+sudo systemctl start synchronizer-cli-monitor`;
+
+  return {
+    success: true,
+    serviceFile,
+    instructions,
+    message: 'Docker image monitoring service file generated successfully'
+  };
+}
+
 program.name('synchronize')
   .description(`🚀 Synchronizer v${packageJson.version} - Complete CLI Toolkit for Multisynq Synchronizer
 
 🎯 FEATURES:
   • Docker container management with auto-installation
+  • Automated Docker image update monitoring (every 30-60 minutes)
   • Multi-platform support (Linux/macOS/Windows) 
   • Systemd service generation for headless operation
   • Real-time web dashboard with performance metrics
@@ -2981,11 +3365,20 @@ program.name('synchronize')
   • Built-in troubleshooting and permission fixes
   • Platform architecture detection (ARM64/AMD64)
 
+🔄 DOCKER IMAGE MONITORING:
+  • Automatic update checking every 30-60 minutes
+  • Manual update checking with interactive pulls
+  • Background monitoring service with systemd integration
+  • Web dashboard integration showing update status
+  • Support for multiple image repositories
+  • Smart caching to avoid unnecessary downloads
+
 🌐 WEB DASHBOARD:
   • Performance metrics (traffic, sessions, users)
   • Persistent wallet lifetime points with breakdown (daily/weekly/monthly)
   • Optional password protection to secure sensitive data
   • QoS monitoring with visual indicators
+  • Docker image update status display
   • Real-time logs with syntax highlighting
   • Service status and configuration display
   • Auto-refresh every 5 seconds
@@ -3003,12 +3396,14 @@ program.name('synchronize')
   • Sensitive data (synq keys, wallets) hidden when not authenticated
   • Basic HTTP authentication with configurable passwords
   • Secure storage of configuration data
+  • Image pull security restrictions
 
 🔧 TROUBLESHOOTING:
   • Automatic Docker installation (Linux)
   • Permission fixes for Docker access
   • Platform compatibility testing
   • Comprehensive error handling
+  • Fixed nightly test command with proper argument parsing
 
 📦 Package: synchronizer@${packageJson.version}
 🏠 Homepage: ${packageJson.homepage}
@@ -3046,5 +3441,21 @@ program.command('validate-key [key]')
   .action(validateSynqKey);
 program.command('nightly').description('Start synchronizer with latest nightly test Docker image').action(startNightly);
 program.command('test-nightly').description('Test nightly launch with direct Docker command').action(testNightly);
+program.command('check-updates').description('Check for Docker image updates manually').action(checkImageUpdates);
+program.command('monitor').description('Start background monitoring for Docker image updates').action(startImageMonitoring);
+program.command('monitor-service').description('Generate systemd service file for image monitoring').action(async () => {
+  try {
+    const result = await installImageMonitoringService();
+    console.log(chalk.green('✅ Image monitoring service file generated successfully!'));
+    console.log(chalk.blue(`📁 Service file: ${result.serviceFile}`));
+    console.log(chalk.blue('\n📋 To install the monitoring service, run:'));
+    console.log(chalk.gray(result.instructions));
+    console.log(chalk.yellow('\n💡 The monitoring service will check for Docker image updates every 30 minutes'));
+    console.log(chalk.cyan('🔍 View monitoring logs with: journalctl -u synchronizer-cli-monitor -f'));
+  } catch (error) {
+    console.error(chalk.red('❌ Error generating monitoring service:'), error.message);
+    process.exit(1);
+  }
+});
 
 program.parse(process.argv);
