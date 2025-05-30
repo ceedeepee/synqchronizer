@@ -590,7 +590,7 @@ async function start() {
   console.log(chalk.blue(`Detected platform: ${platform}/${arch} -> Using Docker platform: ${dockerPlatform}`));
 
   // Set launcher with version matching Croquet version in Docker (2.0.1)
-  const launcherWithVersion = `cli-2.0.1`;
+  const launcherWithVersion = `cli-${packageJson.version}/docker-2.1.0`;
   console.log(chalk.cyan(`Using launcher identifier: ${launcherWithVersion}`));
 
   // Check if we need to pull the latest Docker image
@@ -770,7 +770,7 @@ async function installService() {
   const pathEnv = pathDirs.join(':');
 
   // Set launcher with version matching Croquet version in Docker (2.0.1)
-  const launcherWithVersion = `cli-2.0.1`;
+  const launcherWithVersion = `cli-${packageJson.version}/docker-2.1.0`;
   console.log(chalk.cyan(`Using launcher identifier: ${launcherWithVersion}`));
 
   // Check if Docker image updates are available (this doesn't actually pull, just informs)
@@ -3056,7 +3056,7 @@ async function startNightly() {
   console.log(chalk.blue(`Detected platform: ${platform}/${arch} -> Using Docker platform: ${dockerPlatform}`));
 
   // Set nightly-specific launcher with Croquet version in Docker (2.0.1)
-  const launcherWithVersion = `nightly-test-2.0.1`;
+  const launcherWithVersion = `cli-${packageJson.version}/docker-2.1.0-nightly`;
   console.log(chalk.cyan(`Using launcher identifier: ${launcherWithVersion}`));
 
   // Use the FIXED nightly test image
