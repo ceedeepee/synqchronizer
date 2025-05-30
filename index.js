@@ -3500,11 +3500,175 @@ sudo systemctl start synchronizer-cli-monitor`;
   };
 }
 
+/**
+ * Enterprise API integration - Create synchronizer via Enterprise API
+ * This uses the Enterprise API to automatically provision a synq key
+ */
+async function setupViaEnterpriseAPI() {
+  console.log(chalk.blue('🏢 Enterprise API Setup'));
+  console.log(chalk.yellow('Automatically provision a synq key via Enterprise API\n'));
+
+  // Get Enterprise API key
+  const apiKeyQuestion = await inquirer.prompt([{
+    type: 'password',
+    name: 'enterpriseApiKey',
+    message: 'Enterprise API Key:',
+    validate: input => input ? true : 'Enterprise API Key is required',
+    mask: '*'
+  }]);
+
+  const enterpriseApiKey = apiKeyQuestion.enterpriseApiKey;
+
+  // Get optional synchronizer name
+  const nameQuestion = await inquirer.prompt([{
+    type: 'input',
+    name: 'synchronizerName',
+    message: 'Synchronizer name (optional):',
+    default: ''
+  }]);
+
+  const synchronizerName = nameQuestion.synchronizerName;
+
+  console.log(chalk.cyan('\n🔄 Creating synchronizer via Enterprise API...'));
+
+  try {
+    // Call Enterprise API to create synchronizer
+    const apiUrl = 'https://startsynqing.com/api/synq-keys/enterprise/synchronizer';
+    
+    const requestBody = synchronizerName ? { name: synchronizerName } : {};
+    
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'X-Enterprise-API-Key': enterpriseApiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `API request failed (${response.status})`;
+      
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.message || errorMessage;
+      } catch (parseError) {
+        errorMessage = errorText || errorMessage;
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    const result = await response.json();
+    
+    if (!result.success || !result.synchronizer) {
+      throw new Error(result.message || 'Failed to create synchronizer');
+    }
+
+    const synchronizer = result.synchronizer;
+    const finalName = synchronizer.name || synchronizer.id;
+    
+    console.log(chalk.green('✅ Synchronizer created successfully!'));
+    console.log(chalk.gray(`   ID: ${synchronizer.id}`));
+    console.log(chalk.gray(`   Name: ${finalName}`));
+    console.log(chalk.gray(`   Synq Key: ${synchronizer.key}`));
+
+    // Now set up the CLI configuration automatically
+    console.log(chalk.cyan('\n⚙️ Setting up CLI configuration...'));
+
+    // Get wallet address
+    const walletQuestion = await inquirer.prompt([{
+      type: 'input',
+      name: 'wallet',
+      message: 'Wallet address:',
+      validate: input => input ? true : 'Wallet is required'
+    }]);
+
+    // Ask about dashboard password
+    const passwordQuestion = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'setDashboardPassword',
+      message: 'Set a password for the web dashboard? (Recommended for security):',
+      default: true
+    }]);
+
+    let dashboardPassword = undefined;
+    if (passwordQuestion.setDashboardPassword) {
+      const passwordAnswers = await inquirer.prompt([{
+        type: 'password',
+        name: 'dashboardPassword',
+        message: 'Dashboard password:',
+        validate: input => input && input.length >= 4 ? true : 'Password must be at least 4 characters',
+        mask: '*'
+      }]);
+      dashboardPassword = passwordAnswers.dashboardPassword;
+    }
+
+    // Generate configuration using the API-provided synq key
+    const secret = crypto.randomBytes(8).toString('hex');
+    const hostname = os.hostname();
+    const syncHash = generateSyncHash(finalName, secret, hostname);
+
+    const config = {
+      userName: finalName,
+      key: synchronizer.key,
+      wallet: walletQuestion.wallet,
+      secret,
+      hostname,
+      syncHash,
+      depin: 'wss://api.multisynq.io/depin',
+      launcher: 'cli',
+      enterpriseApiKey: enterpriseApiKey, // Store for future use
+      synchronizerId: synchronizer.id
+    };
+
+    if (dashboardPassword) {
+      config.dashboardPassword = dashboardPassword;
+    }
+
+    // Save configuration
+    saveConfig(config);
+    
+    console.log(chalk.green('\n🎉 Enterprise API setup complete!'));
+    console.log(chalk.blue('📁 Configuration saved to'), CONFIG_FILE);
+    console.log(chalk.cyan(`🔗 Sync Name: ${syncHash}`));
+    console.log(chalk.cyan(`🆔 Synchronizer ID: ${synchronizer.id}`));
+    
+    if (dashboardPassword) {
+      console.log(chalk.yellow('🔒 Dashboard password protection enabled'));
+    }
+    
+    console.log(chalk.gray('\n💡 You can now run:'));
+    console.log(chalk.gray('   synchronize start     # Start synchronizer'));
+    console.log(chalk.gray('   synchronize points    # View points'));
+    console.log(chalk.gray('   synchronize web       # Launch dashboard'));
+
+  } catch (error) {
+    console.error(chalk.red('❌ Enterprise API setup failed:'));
+    console.error(chalk.red(error.message));
+    
+    if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+      console.error(chalk.yellow('\n💡 Troubleshooting:'));
+      console.error(chalk.gray('• Check that your Enterprise API Key is correct'));
+      console.error(chalk.gray('• Ensure your account has enterprise privileges'));
+      console.error(chalk.gray('• Contact support if the issue persists'));
+    } else if (error.message.includes('400') || error.message.includes('Bad Request')) {
+      console.error(chalk.yellow('\n💡 The request was invalid. Check your inputs and try again.'));
+    } else if (error.message.includes('ENOTFOUND') || error.message.includes('network')) {
+      console.error(chalk.yellow('\n💡 Network error. Check your internet connection and try again.'));
+    }
+    
+    process.exit(1);
+  }
+}
+
 program.name('synchronize')
   .description(`🚀 Synchronizer v${packageJson.version} - Complete CLI Toolkit for Multisynq Synchronizer
 
 🎯 FEATURES:
   • Docker container management with auto-installation
+  • Enterprise API integration for automated synq key provisioning
   • Automated Docker image update monitoring (every 30-60 minutes)
   • Multi-platform support (Linux/macOS/Windows) 
   • Systemd service generation for headless operation
@@ -3514,6 +3678,11 @@ program.name('synchronize')
   • Quality of Service (QoS) monitoring
   • Built-in troubleshooting and permission fixes
   • Platform architecture detection (ARM64/AMD64)
+
+🏢 ENTERPRISE API:
+  • Automatic synq key provisioning via Enterprise API
+  • Streamlined setup for enterprise deployments
+  • Automated configuration with API-generated keys
 
 🔄 DOCKER IMAGE MONITORING:
   • Automatic update checking every 30-60 minutes
@@ -3527,7 +3696,8 @@ program.name('synchronize')
   • Enhanced logging with versioned container information
 
 💡 QUICK START:
-    synchronize init          # Initialize with synq key and wallet
+    synchronize init          # Interactive configuration (manual)
+    synchronize api           # Enterprise API setup (automated)
     synchronize start         # Start synchronizer container
     synchronize nightly       # Run fixed nightly test version
     synchronize dashboard     # Launch web dashboard
@@ -3581,5 +3751,6 @@ program.command('monitor-service').description('Generate systemd service file fo
     process.exit(1);
   }
 });
+program.command('api').description('Set up synchronizer via Enterprise API').action(setupViaEnterpriseAPI);
 
 program.parse(process.argv);

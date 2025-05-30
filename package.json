@@ -1,7 +1,7 @@
 {
   "name": "synchronizer-cli",
-  "version": "2.1.8",
-  "description": "Complete CLI toolkit for Multisynq Synchronizer - Production release with completely removed multisynq-org image references, corrected wallet points API integration, intelligent container management for both start and nightly commands, automated reconnection, graceful stop handling, automated image update monitoring, persistent wallet lifetime points tracking, password-protected dashboard, auto-installation, and systemd service generation with built-in troubleshooting",
+  "version": "2.2.0",
+  "description": "Complete CLI toolkit for Multisynq Synchronizer - Production release with Enterprise API integration for automated synq key provisioning, completely removed multisynq-org image references, corrected wallet points API integration, intelligent container management for both start and nightly commands, automated reconnection, graceful stop handling, automated image update monitoring, persistent wallet lifetime points tracking, password-protected dashboard, auto-installation, and systemd service generation with built-in troubleshooting",
   "bin": {
     "synchronize": "index.js"
   },
@@ -42,7 +42,9 @@
     "security",
     "password",
     "authentication",
-    "nightly"
+    "nightly",
+    "enterprise",
+    "api"
   ],
   "engines": {
     "node": ">=10.0.0"
