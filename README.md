@@ -32,6 +32,14 @@
 - 🚀 **Enhanced Help** - Comprehensive feature documentation in CLI help
 - 🔒 **Security Features** - Masked sensitive data display with click-to-reveal
 
+### 🏢 Enterprise Features
+- 🔑 **Enterprise API Integration** - Automatic synq key provisioning via Enterprise API
+- ⚡ **Automated Setup** - Zero-prompt configuration using API preferences (`synchronize --api <key>`)
+- 🌐 **Cloud Deployment Script** - Ready-to-use `startup-synchronizer.sh` for EC2, DigitalOcean, etc.
+- 🏗️ **Multi-cloud Support** - Automated deployment across AWS, Azure, Google Cloud, DigitalOcean
+- 📋 **Enterprise Dashboard** - Centralized management of multiple synchronizers
+- 🔐 **Enterprise Security** - API key-based authentication and secure credential storage
+
 ## Prerequisites
 
 - **Node.js** v10 or higher
@@ -49,6 +57,9 @@ npm install -g synchronizer-cli
 ```bash
 # 1. Configure your synchronizer
 synchronize init
+
+# OR use Enterprise API for automatic setup (enterprise users)
+synchronize --api <your-enterprise-api-key>
 
 # 2. Start the synchronizer
 synchronize start
@@ -79,6 +90,8 @@ synchronize web
 | `synchronize points` | Show wallet lifetime points | Points breakdown, container stats, API status |
 | `synchronize set-password` | Configure dashboard password | Password setting, security management |
 | `synchronize validate-key [key]` | Validate a synq key | Local format check, remote API validation |
+| `synchronize api` | Interactive Enterprise API setup | Guided enterprise key provisioning with prompts |
+| `synchronize --api <key>` | Automatic Enterprise API setup | Zero-prompt setup using API preferences |
 
 ## Web Dashboard
 
@@ -231,21 +244,60 @@ Configuration is stored in `~/.synchronizer-cli/config.json`:
 }
 ```
 
+## Cloud Deployment
+
+For automated cloud instance deployment, synchronizer-cli includes a production-ready startup script:
+
+### startup-synchronizer.sh
+
+**Ready-to-deploy cloud automation script for Enterprise API users**
+
+```bash
+# Download and customize for your environment
+curl -o startup-synchronizer.sh https://raw.githubusercontent.com/multisynq/synchronizer-cli/main/startup-synchronizer.sh
+
+# Replace API key placeholder
+sed -i 's/\[your-api-key\]/your-enterprise-api-key/g' startup-synchronizer.sh
+
+# Deploy to cloud instance (AWS EC2, DigitalOcean, Google Cloud, etc.)
+# Use as User Data script during instance creation
+```
+
+**Features:**
+- ✅ **Complete automation** - from fresh instance to running synchronizer
+- ✅ **Multi-cloud compatible** - AWS EC2, DigitalOcean, Google Cloud, Azure
+- ✅ **Enterprise API integration** - uses `synchronize --api` for hands-free setup
+- ✅ **Error handling** - robust deployment with failure detection
+- ✅ **Progress logging** - visual feedback during installation
+
+**Supported Platforms:**
+- AWS EC2 (Ubuntu AMI)
+- DigitalOcean Droplets
+- Google Cloud Compute Engine
+- Azure Virtual Machines
+- Any Ubuntu/Debian cloud instance
+
+See `ENTERPRISE.md` for complete deployment examples and multi-cloud instructions.
+
 ## Version Information
 
 The synchronizer-cli ecosystem uses several versioned components:
 
 | Component | Version | Description |
 |-----------|---------|-------------|
-| **synchronizer-cli** | 2.0.8 | The npm package version of this CLI tool |
-| **Croquet** | 2.0.1 | The version of Croquet used in the Docker image |
+| **synchronizer-cli** | 2.2.5 | The npm package version of this CLI tool |
+| **Croquet** | 2.1.3 | The version of Croquet used in the Docker image |
 | **Docker Image** | latest | The cdrakep/synqchronizer Docker image tag |
-| **Launcher ID** | cli-2.0.1 | The launcher identifier used for the Croquet session |
+| **Launcher ID** | cli-2.2.5 | The launcher identifier used for the Croquet session |
 
-When using the CLI, the launcher ID is automatically set to match the Croquet version (e.g., `cli-2.0.1`) to ensure session compatibility. The Docker image is configured to use the correct Croquet version internally.
+When using the CLI, the launcher ID is automatically set to match the CLI version (e.g., `cli-2.2.5/docker-2.1.3`) to ensure session compatibility. The Docker image is configured to use the correct Croquet version internally.
 
 ### Version History
 
+- **2.2.5**: Added cloud deployment startup script and enhanced Enterprise documentation
+- **2.2.4**: Enhanced Enterprise API integration with web interface support and automatic setup
+- **2.2.3**: Added Enterprise API integration with automatic synq key provisioning
+- **2.2.2**: Improved wallet points API integration and intelligent container management
 - **2.0.8**: Fixed API validation to properly include synchronizer nickname
 - **2.0.7**: Improved lifetime points tracking with direct registry API integration
 - **2.0.6**: Added synq key validation with both local format checking and remote API verification
