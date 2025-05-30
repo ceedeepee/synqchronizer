@@ -2111,8 +2111,7 @@ async function getSystemStatus(config) {
     try {
       const images = [
         'cdrakep/synqchronizer:latest',
-        'cdrakep/synqchronizer-test-fixed:latest',
-        'multisynq-org/synchronizer-cli:latest'
+        'cdrakep/synqchronizer-test-fixed:latest'
       ];
       
       let updatesAvailable = 0;
@@ -2474,19 +2473,33 @@ async function getPointsData(config) {
 
 async function getContainerStats() {
   try {
-    // Check if the synchronizer container is running
-    const containerName = 'synchronizer-cli';
+    // Check for either synchronizer container
+    const containerNames = ['synchronizer-cli', 'synchronizer-nightly'];
+    let containerName = null;
     
-    // First check if container exists and is running
-    const psOutput = execSync(`docker ps --filter name=${containerName} --format "{{.Names}}"`, {
-      encoding: 'utf8',
-      stdio: 'pipe'
-    });
+    // Find which container is running
+    for (const name of containerNames) {
+      try {
+        const psOutput = execSync(`docker ps --filter name=${name} --format "{{.Names}}"`, {
+          encoding: 'utf8',
+          stdio: 'pipe'
+        });
+        
+        if (psOutput.includes(name)) {
+          containerName = name;
+          break;
+        }
+      } catch (error) {
+        // Continue checking next container name
+      }
+    }
     
-    if (!psOutput.includes(containerName)) {
-      console.log('Synchronizer container not running');
+    if (!containerName) {
+      console.log('No synchronizer container running');
       return null;
     }
+    
+    console.log(`Found running container: ${containerName}`);
     
     // Check how long the container has been running
     const inspectOutput = execSync(`docker inspect ${containerName} --format "{{.State.StartedAt}}"`, {
