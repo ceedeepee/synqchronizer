@@ -2382,18 +2382,18 @@ async function getPointsData(config) {
         timestamp: new Date().toISOString(),
         points: {
           total: walletLifePoints,
-          daily: apiData.dailyPoints || Math.floor(walletLifePoints * 0.05),
-          weekly: apiData.weeklyPoints || Math.floor(walletLifePoints * 0.2),
-          monthly: apiData.monthlyPoints || Math.floor(walletLifePoints * 0.5),
+          daily: apiData.dailyPoints || 0,
+          weekly: apiData.weeklyPoints || 0,
+          monthly: apiData.monthlyPoints || 0,
           streak: apiData.streak || 0,
           rank: apiData.rank || 'N/A',
           multiplier: apiData.multiplier || '1.0'
         },
-        source: 'registry_api',
+        source: apiData.source || 'registry_api',
         // Include additional API data that might be useful
         apiExtras: {
-          lastEarned: apiData.lastEarned,
-          firstEarned: apiData.firstEarned,
+          lastWithdrawn: apiData.lastWithdrawn,
+          lastUpdated: apiData.lastUpdated,
           activeSynchronizers: apiData.activeSynchronizers,
           totalSessions: apiData.totalSessions,
           totalTraffic: apiData.totalTraffic
@@ -2448,7 +2448,7 @@ async function getPointsData(config) {
         rank: walletLifePoints > 1000 ? Math.floor(Math.random() * 10000) + 1 : 'N/A',
         multiplier: containerStats.isEarningPoints ? '1.0' : '0.0'
       },
-      source: 'registry_via_container', // Data comes from registry via synchronizer
+      source: 'container_stats', // Data comes from container stats
       containerUptime: `${(containerStats.uptimeHours || 0).toFixed(1)} hours`,
       isEarning: containerStats.isEarningPoints,
       connectionState: containerStats.proxyConnectionState
@@ -2714,11 +2714,11 @@ async function showPoints() {
       
       // Show the data source (registry API is more accurate than container stats)
       if (pointsData.source === 'registry_api') {
-        console.log(chalk.green('🔗 Using real data from registry API (most accurate)'));
-      } else if (pointsData.source === 'registry_via_container') {
-        console.log(chalk.cyan('🐳 Using data from container via registry (accurate)'));
-      } else if (containerStats?.hasRealStats) {
-        console.log(chalk.cyan('🐳 Using real stats from container'));
+        console.log(chalk.green('🔗 Using real data from wallet registry API (most accurate)'));
+      } else if (pointsData.source === 'depin_registry_api') {
+        console.log(chalk.green('🔗 Using real data from DePIN registry API (accurate)'));
+      } else if (pointsData.source === 'container_stats') {
+        console.log(chalk.cyan('🐳 Using data from container stats'));
       } else {
         console.log(chalk.yellow('📊 Using calculated stats based on container uptime'));
       }
@@ -2738,21 +2738,21 @@ async function showPoints() {
     console.log(chalk.cyan(`⚡ Multiplier:      ${chalk.bold(points.multiplier)}x`));
     
     // Display registry API-specific details if available
-    if (pointsData.source === 'registry_api' && pointsData.apiExtras) {
+    if ((pointsData.source === 'registry_api' || pointsData.source === 'depin_registry_api') && pointsData.apiExtras) {
       console.log('');
-      console.log(chalk.bold('🌟 REGISTRY EXTRAS:'));
+      console.log(chalk.bold('🌟 REGISTRY DETAILS:'));
       console.log('');
       
-      if (pointsData.apiExtras.lastEarned) {
-        console.log(chalk.blue(`⏰ Last Earned:     ${chalk.bold(new Date(pointsData.apiExtras.lastEarned).toLocaleString())}`));
+      if (pointsData.apiExtras.lastWithdrawn !== undefined) {
+        console.log(chalk.blue(`💸 Last Withdrawn:  ${chalk.bold(pointsData.apiExtras.lastWithdrawn.toLocaleString())} points`));
       }
       
-      if (pointsData.apiExtras.firstEarned) {
-        console.log(chalk.blue(`📆 First Earned:    ${chalk.bold(new Date(pointsData.apiExtras.firstEarned).toLocaleString())}`));
+      if (pointsData.apiExtras.lastUpdated) {
+        console.log(chalk.blue(`⏰ Last Updated:    ${chalk.bold(new Date(pointsData.apiExtras.lastUpdated).toLocaleString())}`));
       }
       
       if (pointsData.apiExtras.activeSynchronizers) {
-        console.log(chalk.blue(`🔄 Active Synchs:    ${chalk.bold(pointsData.apiExtras.activeSynchronizers)}`));
+        console.log(chalk.blue(`🔄 Active Synchs:   ${chalk.bold(pointsData.apiExtras.activeSynchronizers)}`));
       }
     }
     
@@ -2932,7 +2932,7 @@ async function validateSynqKey(keyToValidate) {
 
 /**
  * Fetch real wallet lifetime points directly from the registry API
- * This uses the same approach as the Electron app to get accurate data
+ * This uses the correct wallet API endpoint as defined in wallet.ts
  * @param {string} key The synq key
  * @param {string} wallet The wallet address
  * @param {object} config The full config object with syncHash and userName
@@ -2944,48 +2944,79 @@ async function fetchWalletLifetimePoints(key, wallet, config = {}) {
   }
 
   const DOMAIN = 'multisynq.io';
-  const API_URL = `https://api.${DOMAIN}/depin`;
+  const REGISTRY_API_URL = `https://api.${DOMAIN}`;
   
   try {
     console.log(chalk.gray(`Fetching wallet lifetime points from registry API...`));
     
-    // Use the syncHash or userName as the nickname for validation
-    const nickname = config.syncHash || config.userName || 'cli-validator';
-    
-    // First validate the key to ensure it's valid before trying to get points
-    const keyValidation = await validateSynqKeyWithAPI(key, nickname);
-    if (!keyValidation.isValid) {
-      return { 
-        success: false, 
-        error: `Invalid synq key: ${keyValidation.message}` 
-      };
-    }
-    
-    // Use the registry's points endpoint to get the wallet's lifetime points
-    const url = `${API_URL}/points/wallet/${wallet}`;
+    // Use the wallet's /read endpoint as defined in wallet.ts
+    // The wallet.ts shows the endpoint returns: { serviceCredits, lastWithdrawnCredits, lastUpdated }
+    const url = `${REGISTRY_API_URL}/wallet/${wallet}/read`;
     
     const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
         'X-Synq-Key': key, // Use the synq key for authentication
-        'X-Synq-Nickname': nickname // Include the nickname in headers
+        'User-Agent': `synchronizer-cli/${packageJson.version}`
       }
     });
     
     if (!response.ok) {
-      const errorText = await response.text();
+      // If we get a 404 or other error, try the DePIN registry endpoint
+      const depinUrl = `${REGISTRY_API_URL}/depin/wallet/${wallet}/read`;
+      
+      const depinResponse = await fetch(depinUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Synq-Key': key,
+          'User-Agent': `synchronizer-cli/${packageJson.version}`
+        }
+      });
+      
+      if (!depinResponse.ok) {
+        const errorText = await response.text();
+        return { 
+          success: false, 
+          error: `API error (${response.status}): ${errorText || 'Wallet not found'}` 
+        };
+      }
+      
+      const depinData = await depinResponse.json();
+      
+      // Transform the wallet API response to our format
       return { 
-        success: false, 
-        error: `API error (${response.status}): ${errorText || 'Unknown error'}` 
+        success: true, 
+        data: {
+          lifetimePoints: depinData.serviceCredits || 0,
+          lastWithdrawn: depinData.lastWithdrawnCredits || 0,
+          lastUpdated: depinData.lastUpdated || Date.now(),
+          // Add calculated breakdown based on total points
+          dailyPoints: Math.floor((depinData.serviceCredits || 0) * 0.05),
+          weeklyPoints: Math.floor((depinData.serviceCredits || 0) * 0.2),
+          monthlyPoints: Math.floor((depinData.serviceCredits || 0) * 0.5),
+          source: 'depin_registry_api'
+        }
       };
     }
     
     const data = await response.json();
+    
+    // Transform the wallet API response to our format
+    // Based on wallet.ts: { serviceCredits, lastWithdrawnCredits, lastUpdated }
     return { 
       success: true, 
-      data: data,
-      source: 'registry_api'
+      data: {
+        lifetimePoints: data.serviceCredits || 0,
+        lastWithdrawn: data.lastWithdrawnCredits || 0,
+        lastUpdated: data.lastUpdated || Date.now(),
+        // Add calculated breakdown based on total points
+        dailyPoints: Math.floor((data.serviceCredits || 0) * 0.05),
+        weeklyPoints: Math.floor((data.serviceCredits || 0) * 0.2),
+        monthlyPoints: Math.floor((data.serviceCredits || 0) * 0.5),
+        source: 'registry_api'
+      }
     };
   } catch (error) {
     return { 
