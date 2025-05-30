@@ -3369,45 +3369,19 @@ program.name('synchronize')
   • Automatic update checking every 30-60 minutes
   • Manual update checking with interactive pulls
   • Background monitoring service with systemd integration
-  • Web dashboard integration showing update status
-  • Support for multiple image repositories
-  • Smart caching to avoid unnecessary downloads
+  • Version tracking with CLI version / Docker version format
 
-🌐 WEB DASHBOARD:
-  • Performance metrics (traffic, sessions, users)
-  • Persistent wallet lifetime points with breakdown (daily/weekly/monthly)
-  • Optional password protection to secure sensitive data
-  • QoS monitoring with visual indicators
-  • Docker image update status display
-  • Real-time logs with syntax highlighting
-  • Service status and configuration display
-  • Auto-refresh every 5 seconds
+🐳 FIXED CONTAINER VERSIONING:
+  • Displays "CLI {version} / Docker {version}" format
+  • Proper environment variable injection for versions
+  • Enhanced logging with versioned container information
 
-💰 PERSISTENT WALLET POINTS:
-  • Lifetime points accumulate across container restarts
-  • Session-based tracking with persistent storage
-  • Daily, weekly, and monthly point breakdowns
-  • Earning streak and rank monitoring
-  • Container uptime and earning status
-  • API endpoints for programmatic access
-
-🔒 SECURITY:
-  • Optional password protection for web dashboard
-  • Sensitive data (synq keys, wallets) hidden when not authenticated
-  • Basic HTTP authentication with configurable passwords
-  • Secure storage of configuration data
-  • Image pull security restrictions
-
-🔧 TROUBLESHOOTING:
-  • Automatic Docker installation (Linux)
-  • Permission fixes for Docker access
-  • Platform compatibility testing
-  • Comprehensive error handling
-  • Fixed nightly test command with proper argument parsing
-
-📦 Package: synchronizer@${packageJson.version}
-🏠 Homepage: ${packageJson.homepage}
-📋 Issues: ${packageJson.bugs.url}`)
+💡 QUICK START:
+    synchronize init          # Initialize with synq key and wallet
+    synchronize start         # Start synchronizer container
+    synchronize nightly       # Run fixed nightly test version
+    synchronize dashboard     # Launch web dashboard
+    synchronize check-updates # Check for Docker image updates`)
   .version(packageJson.version);
 
 program.command('init').description('Interactive configuration').action(init);
