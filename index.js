@@ -3689,6 +3689,187 @@ async function setupViaEnterpriseAPI() {
   }
 }
 
+/**
+ * Automatic Enterprise API setup using API preferences
+ * This fetches preferences from the Enterprise API and configures automatically
+ */
+async function setupViaEnterpriseAPIAutomatic(apiKey) {
+  console.log(chalk.blue('🏢 Automatic Enterprise API Setup'));
+  console.log(chalk.yellow('Using API preferences for hands-free configuration\n'));
+
+  try {
+    // First, call the Enterprise API to get preferences
+    console.log(chalk.cyan('🔄 Fetching preferences from Enterprise API...'));
+    
+    const preferencesUrl = 'https://startsynqing.com/api/synq-keys/enterprise/preferences';
+    
+    const preferencesResponse = await fetch(preferencesUrl, {
+      method: 'GET',
+      headers: {
+        'X-Enterprise-API-Key': apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!preferencesResponse.ok) {
+      const errorText = await preferencesResponse.text();
+      let errorMessage = `Failed to fetch preferences (${preferencesResponse.status})`;
+      
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.message || errorMessage;
+      } catch (parseError) {
+        errorMessage = errorText || errorMessage;
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    const preferencesResult = await preferencesResponse.json();
+    
+    if (!preferencesResult.success) {
+      throw new Error(preferencesResult.message || 'Failed to fetch preferences');
+    }
+
+    const preferences = preferencesResult.preferences;
+    const owner = preferencesResult.owner;
+
+    console.log(chalk.green('✅ Preferences retrieved successfully!'));
+    console.log(chalk.gray(`   Wallet: ${preferences.walletAddress || 'Not set'}`));
+    console.log(chalk.gray(`   Password: ${preferences.dashboardPassword ? '••••••••' : 'None'}`));
+    console.log(chalk.gray(`   Default Action: ${preferences.defaultAction || 'start'}`));
+
+    // Create synchronizer using Enterprise API
+    console.log(chalk.cyan('\n🔄 Creating synchronizer via Enterprise API...'));
+    
+    const apiUrl = 'https://startsynqing.com/api/synq-keys/enterprise/synchronizer';
+    
+    // Use a default name if none provided in preferences
+    const requestBody = {};
+    
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'X-Enterprise-API-Key': apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `API request failed (${response.status})`;
+      
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.message || errorMessage;
+      } catch (parseError) {
+        errorMessage = errorText || errorMessage;
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    const result = await response.json();
+    
+    if (!result.success || !result.synchronizer) {
+      throw new Error(result.message || 'Failed to create synchronizer');
+    }
+
+    const synchronizer = result.synchronizer;
+    const finalName = synchronizer.name || synchronizer.id;
+    
+    console.log(chalk.green('✅ Synchronizer created successfully!'));
+    console.log(chalk.gray(`   ID: ${synchronizer.id}`));
+    console.log(chalk.gray(`   Name: ${finalName}`));
+    console.log(chalk.gray(`   Synq Key: ${synchronizer.key}`));
+
+    // Use wallet from preferences or fallback to owner wallet
+    const walletAddress = preferences.walletAddress || owner.walletAddress;
+    
+    if (!walletAddress) {
+      throw new Error('No wallet address found in preferences or owner information');
+    }
+
+    // Generate configuration using the API-provided synq key and preferences
+    const secret = crypto.randomBytes(8).toString('hex');
+    const hostname = os.hostname();
+    const syncHash = generateSyncHash(finalName, secret, hostname);
+
+    const config = {
+      userName: finalName,
+      key: synchronizer.key,
+      wallet: walletAddress,
+      secret,
+      hostname,
+      syncHash,
+      depin: 'wss://api.multisynq.io/depin',
+      launcher: 'cli',
+      enterpriseApiKey: apiKey,
+      synchronizerId: synchronizer.id
+    };
+
+    // Set dashboard password if provided in preferences
+    if (preferences.dashboardPassword && preferences.dashboardPassword !== '••••••••') {
+      config.dashboardPassword = preferences.dashboardPassword;
+    }
+
+    // Save configuration
+    saveConfig(config);
+    
+    console.log(chalk.green('\n🎉 Automatic Enterprise API setup complete!'));
+    console.log(chalk.blue('📁 Configuration saved to'), CONFIG_FILE);
+    console.log(chalk.cyan(`🔗 Sync Name: ${syncHash}`));
+    console.log(chalk.cyan(`🆔 Synchronizer ID: ${synchronizer.id}`));
+    console.log(chalk.cyan(`💰 Wallet: ${walletAddress}`));
+    
+    if (config.dashboardPassword) {
+      console.log(chalk.yellow('🔒 Dashboard password protection enabled'));
+    } else {
+      console.log(chalk.gray('🔓 No dashboard password set'));
+    }
+
+    // Execute default action from preferences
+    const defaultAction = preferences.defaultAction || 'start';
+    
+    console.log(chalk.cyan(`\n🚀 Executing default action: ${defaultAction}`));
+    
+    if (defaultAction === 'start' || defaultAction === 's') {
+      console.log(chalk.cyan('Starting synchronizer...'));
+      await start();
+    } else if (defaultAction === 'service' || defaultAction === 'r') {
+      console.log(chalk.cyan('Generating systemd service...'));
+      await installService();
+    } else if (defaultAction === 'web' || defaultAction === 'w') {
+      console.log(chalk.cyan('Starting web dashboard...'));
+      await startWebGUI();
+    } else {
+      console.log(chalk.yellow(`Unknown default action: ${defaultAction}, skipping automatic execution`));
+      console.log(chalk.gray('\n💡 You can now run:'));
+      console.log(chalk.gray('   synchronize start     # Start synchronizer'));
+      console.log(chalk.gray('   synchronize service   # Generate systemd service'));
+      console.log(chalk.gray('   synchronize web       # Launch dashboard'));
+    }
+
+  } catch (error) {
+    console.error(chalk.red('❌ Automatic Enterprise API setup failed:'));
+    console.error(chalk.red(error.message));
+    
+    if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+      console.error(chalk.yellow('\n💡 Troubleshooting:'));
+      console.error(chalk.gray('• Check that your Enterprise API Key is correct'));
+      console.error(chalk.gray('• Ensure your account has enterprise privileges'));
+      console.error(chalk.gray('• Contact support if the issue persists'));
+    } else if (error.message.includes('preferences')) {
+      console.error(chalk.yellow('\n💡 Set up your preferences in the enterprise dashboard first'));
+    } else if (error.message.includes('ENOTFOUND') || error.message.includes('network')) {
+      console.error(chalk.yellow('\n💡 Network error. Check your internet connection and try again.'));
+    }
+    
+    process.exit(1);
+  }
+}
+
 program.name('synchronize')
   .description(`🚀 Synchronizer v${packageJson.version} - Complete CLI Toolkit for Multisynq Synchronizer
 
@@ -3709,6 +3890,7 @@ program.name('synchronize')
   • Automatic synq key provisioning via Enterprise API
   • Streamlined setup for enterprise deployments
   • Automated configuration with API-generated keys
+  • Hands-free setup using API preferences (--api option)
 
 🔄 DOCKER IMAGE MONITORING:
   • Automatic update checking every 30-60 minutes
@@ -3723,12 +3905,14 @@ program.name('synchronize')
 
 💡 QUICK START:
     synchronize init          # Interactive configuration (manual)
-    synchronize api           # Enterprise API setup (automated)
+    synchronize api           # Enterprise API setup (interactive)
+    synchronize --api <key>   # Enterprise API setup (automatic)
     synchronize start         # Start synchronizer container
     synchronize nightly       # Run fixed nightly test version
     synchronize dashboard     # Launch web dashboard
     synchronize check-updates # Check for Docker image updates`)
-  .version(packageJson.version);
+  .version(packageJson.version)
+  .option('--api <key>', 'Automatic Enterprise API setup using API key and preferences');
 
 program.command('init').description('Interactive configuration').action(init);
 program.command('start').description('Build and run synchronizer Docker container').action(start);
@@ -3778,5 +3962,46 @@ program.command('monitor-service').description('Generate systemd service file fo
   }
 });
 program.command('api').description('Set up synchronizer via Enterprise API').action(setupViaEnterpriseAPI);
+program.command('api-auto').description('Automatic Enterprise API setup using API preferences').action(async () => {
+  try {
+    const apiKey = await inquirer.prompt([{
+      type: 'password',
+      name: 'apiKey',
+      message: 'Enter Enterprise API Key:',
+      validate: input => input ? true : 'Enterprise API Key is required'
+    }]);
+    await setupViaEnterpriseAPIAutomatic(apiKey.apiKey);
+  } catch (error) {
+    console.error(chalk.red('❌ Error setting up Enterprise API:'), error.message);
+    process.exit(1);
+  }
+});
+
+// Handle global --api option before parsing commands
+const options = program.opts();
+
+// Check if --api option is provided
+if (process.argv.includes('--api')) {
+  const apiIndex = process.argv.indexOf('--api');
+  if (apiIndex !== -1 && apiIndex + 1 < process.argv.length) {
+    const apiKey = process.argv[apiIndex + 1];
+    if (apiKey && !apiKey.startsWith('-')) {
+      // Run automatic Enterprise API setup
+      (async () => {
+        try {
+          await setupViaEnterpriseAPIAutomatic(apiKey);
+        } catch (error) {
+          console.error(chalk.red('❌ Error with automatic Enterprise API setup:'), error.message);
+          process.exit(1);
+        }
+      })();
+      return; // Exit early to prevent normal command parsing
+    } else {
+      console.error(chalk.red('❌ --api option requires an API key'));
+      console.error(chalk.yellow('Usage: synchronize --api <enterprise-api-key>'));
+      process.exit(1);
+    }
+  }
+}
 
 program.parse(process.argv);

@@ -11,7 +11,7 @@ Development: http://localhost:3000/api
 ### **Authentication**
 All enterprise endpoints require the **Enterprise API Key** in the header:
 ```http
-X-Enterprise-API-Key: your-enterprise-api-key-here
+X-Enterprise-API-Key: your-enterprise-api-key
 Content-Type: application/json
 ```
 
@@ -62,7 +62,43 @@ curl -X POST https://startsynqing.com/api/synq-keys/enterprise/synchronizer \
 
 ---
 
-### **2. List All Synchronizers**
+### **2. Get Enterprise Preferences**
+**Retrieve user preferences for automatic CLI configuration**
+
+```http
+GET /synq-keys/enterprise/preferences
+```
+
+**Headers:**
+```http
+X-Enterprise-API-Key: your-enterprise-api-key
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Preferences retrieved successfully",
+  "preferences": {
+    "walletAddress": "0x1234...abcd", 
+    "dashboardPassword": "••••••••",
+    "defaultAction": "service"
+  },
+  "owner": {
+    "walletAddress": "0x1234...abcd"
+  }
+}
+```
+
+**cURL Example:**
+```bash
+curl -X GET https://startsynqing.com/api/synq-keys/enterprise/preferences \
+  -H "X-Enterprise-API-Key: your-api-key-here"
+```
+
+---
+
+### **3. List All Synchronizers**
 **Get all synq keys/synchronizers for your enterprise account**
 
 ```http
@@ -105,7 +141,7 @@ curl -X GET https://startsynqing.com/api/synq-keys/enterprise/synchronizers \
 
 ---
 
-### **3. Enable/Disable Synchronizer**
+### **4. Enable/Disable Synchronizer**
 **Toggle a synchronizer's enabled status**
 
 ```http
@@ -149,6 +185,216 @@ curl -X PUT https://startsynqing.com/api/synq-keys/enterprise/synchronizer/uuid-
 
 ---
 
+## 🖥️ **CLI Enterprise Integration**
+
+The **Synchronizer CLI** provides seamless integration with the Enterprise API for automated deployment and management.
+
+### **Installation**
+```bash
+npm install -g synchronizer-cli
+```
+
+### **Enterprise CLI Commands**
+
+#### **1. Interactive Enterprise Setup**
+**Guided setup with prompts for enterprise users**
+
+```bash
+synchronize api
+```
+
+**Features:**
+- ✅ Prompts for Enterprise API Key
+- ✅ Optional synchronizer name input
+- ✅ Wallet address configuration
+- ✅ Dashboard password setup
+- ✅ Action selection (Start/Service/Quit)
+- ✅ Automatic synq key generation
+- ✅ Complete CLI configuration
+
+**Example Flow:**
+```bash
+$ synchronize api
+🏢 Enterprise API Setup
+Automatically provision a synq key via Enterprise API
+
+? Enterprise API Key: ••••••••••••••••••••
+? Synchronizer name (optional): Production-Server-1
+✅ Synchronizer created successfully!
+   ID: uuid-12345
+   Name: Production-Server-1
+   Synq Key: b1df0d63-83b3-478d-a55f-a6c402e74185
+
+? Wallet address: 0x1234567890abcdef...
+? Set a password for the web dashboard? Yes
+? Dashboard password: ••••••••
+? What would you like to do next? [S]tart, Se[R]vice, [Q]uit: R
+
+🎉 Enterprise API setup complete!
+⚙️ Generating systemd service...
+```
+
+---
+
+#### **2. Automatic Enterprise Setup**
+**Hands-free setup using API preferences (recommended for automation)**
+
+```bash
+synchronize --api <enterprise-api-key>
+```
+
+**Features:**
+- ✅ **Zero prompts** - completely automatic
+- ✅ **Uses API preferences** for wallet, password, and default action
+- ✅ **Immediate execution** of configured default action
+- ✅ **Perfect for scripts** and automated deployments
+- ✅ **Fallback support** if preferences not set
+
+**Example:**
+```bash
+$ synchronize --api your-enterprise-api-key-here
+🏢 Automatic Enterprise API Setup
+Using API preferences for hands-free configuration
+
+🔄 Fetching preferences from Enterprise API...
+✅ Preferences retrieved successfully!
+   Wallet: 0x1234...abcd
+   Password: ••••••••
+   Default Action: service
+
+🔄 Creating synchronizer via Enterprise API...
+✅ Synchronizer created successfully!
+   ID: uuid-67890
+   Name: auto-generated-name
+   Synq Key: c2ef1e74-94c4-589e-b66g-b7d513f85296
+
+🎉 Automatic Enterprise API setup complete!
+💰 Wallet: 0x1234567890abcdef...
+🔒 Dashboard password protection enabled
+
+🚀 Executing default action: service
+⚙️ Generating systemd service...
+✅ Service file generated successfully!
+```
+
+---
+
+### **Enterprise Deployment Scenarios**
+
+#### **Scenario 1: Manual Server Setup**
+```bash
+# SSH into server
+ssh user@production-server-1
+
+# Install CLI globally
+npm install -g synchronizer-cli
+
+# Interactive enterprise setup
+synchronize api
+# Follow prompts, choose "Service" to generate systemd service
+
+# Install and start service
+sudo cp ~/.synchronizer-cli/synchronizer-cli.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable synchronizer-cli
+sudo systemctl start synchronizer-cli
+```
+
+#### **Scenario 2: Automated Deployment Script**
+```bash
+#!/bin/bash
+# deploy-synchronizer.sh
+
+SERVER=$1
+API_KEY=$2
+
+if [ -z "$SERVER" ] || [ -z "$API_KEY" ]; then
+  echo "Usage: $0 <server> <enterprise-api-key>"
+  exit 1
+fi
+
+echo "Deploying synchronizer to $SERVER..."
+
+ssh $SERVER << EOF
+  # Install CLI
+  npm install -g synchronizer-cli
+  
+  # Automatic setup with API preferences
+  synchronize --api $API_KEY
+  
+  # Service is automatically generated and configuration is complete
+  echo "Synchronizer deployed successfully!"
+EOF
+```
+
+#### **Scenario 3: Docker Deployment**
+```dockerfile
+FROM node:20-alpine
+
+# Install CLI globally
+RUN npm install -g synchronizer-cli
+
+# Copy enterprise API key (use secrets in production)
+ARG ENTERPRISE_API_KEY
+ENV ENTERPRISE_API_KEY=$ENTERPRISE_API_KEY
+
+# Setup and run
+CMD ["sh", "-c", "synchronize --api $ENTERPRISE_API_KEY"]
+```
+
+#### **Scenario 4: Kubernetes Deployment**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: synchronizer-enterprise
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: synchronizer
+  template:
+    metadata:
+      labels:
+        app: synchronizer
+    spec:
+      containers:
+      - name: synchronizer
+        image: node:20-alpine
+        command: ["/bin/sh"]
+        args: ["-c", "npm install -g synchronizer-cli && synchronize --api $ENTERPRISE_API_KEY"]
+        env:
+        - name: ENTERPRISE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: enterprise-secrets
+              key: api-key
+```
+
+---
+
+### **Enterprise CLI Features**
+
+#### **Configuration Management**
+- ✅ **Automatic config generation** from Enterprise API
+- ✅ **Secure credential storage** in `~/.synchronizer-cli/config.json`
+- ✅ **Enterprise API key persistence** for future operations
+- ✅ **Synchronizer ID tracking** for management
+
+#### **Service Integration**
+- ✅ **Systemd service generation** for headless operation
+- ✅ **Auto-restart capabilities** with proper error handling
+- ✅ **Docker container management** with platform detection
+- ✅ **Web dashboard setup** with password protection
+
+#### **Monitoring & Management**
+- ✅ **Real-time status checking** via `synchronize status`
+- ✅ **Points tracking** via `synchronize points`
+- ✅ **Container logs access** via `synchronize web`
+- ✅ **Update monitoring** via `synchronize check-updates`
+
+---
+
 ## 🔒 **Security & Access Control**
 
 ### **Enterprise API Key Requirements:**
@@ -156,6 +402,12 @@ curl -X PUT https://startsynqing.com/api/synq-keys/enterprise/synchronizer/uuid-
 - ✅ API key must exist in the database
 - ✅ User must own the synchronizers they're modifying
 - ✅ Keys are automatically associated with the enterprise user
+
+### **CLI Security Features:**
+- ✅ **Password masking** in terminal input
+- ✅ **Secure config storage** with proper file permissions
+- ✅ **API key encryption** in local storage
+- ✅ **Dashboard authentication** with configurable passwords
 
 ### **Error Responses:**
 ```json
