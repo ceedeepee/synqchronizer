@@ -3643,14 +3643,14 @@ async function setupViaEnterpriseAPI() {
     const nextActionQuestion = await inquirer.prompt([{
       type: 'input',
       name: 'action',
-      message: 'What would you like to do next? [S]tart, Se[R]vice, [Q]uit:',
+      message: 'What would you like to do next? [S]tart, Se[R]vice, [W]eb, [Q]uit:',
       default: 'start',
       validate: (input) => {
         const normalized = input.toLowerCase().trim();
-        if (['start', 's', 'service', 'r', 'quit', 'q'].includes(normalized)) {
+        if (['start', 's', 'service', 'r', 'web', 'w', 'quit', 'q'].includes(normalized)) {
           return true;
         }
-        return 'Please enter: Start/S, Service/R, or Quit/Q';
+        return 'Please enter: Start/S, Service/R, Web/W, or Quit/Q';
       }
     }]);
 
@@ -3662,6 +3662,9 @@ async function setupViaEnterpriseAPI() {
     } else if (action === 'service' || action === 'r') {
       console.log(chalk.cyan('\n⚙️ Generating systemd service...'));
       await installService();
+    } else if (action === 'web' || action === 'w') {
+      console.log(chalk.cyan('\n🌐 Starting web dashboard...'));
+      await startWebGUI();
     } else {
       console.log(chalk.gray('\n💡 You can now run:'));
       console.log(chalk.gray('   synchronize start     # Start synchronizer'));
@@ -3738,6 +3741,7 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
     console.log(chalk.gray(`   Wallet: ${preferences.walletAddress || 'Not set'}`));
     console.log(chalk.gray(`   Password: ${preferences.dashboardPassword ? '••••••••' : 'None'}`));
     console.log(chalk.gray(`   Default Action: ${preferences.defaultAction || 'start'}`));
+    console.log(chalk.gray(`   Web Interface: ${preferences.web ? 'Yes' : 'No'}`));
 
     // Create synchronizer using Enterprise API
     console.log(chalk.cyan('\n🔄 Creating synchronizer via Enterprise API...'));
@@ -3828,6 +3832,15 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
     } else {
       console.log(chalk.gray('🔓 No dashboard password set'));
     }
+    // Start web interface if web preference is true
+    if (preferences.web === true) {
+      console.log(chalk.cyan('\n🌐 Starting web dashboard (from preferences)...'));
+      // Start web interface in background
+      setTimeout(() => {
+        startWebGUI().catch(console.error);
+      }, 1000);
+    }
+
 
     // Execute default action from preferences
     const defaultAction = preferences.defaultAction || 'start';

@@ -82,7 +82,8 @@ X-Enterprise-API-Key: your-enterprise-api-key
   "preferences": {
     "walletAddress": "0x1234...abcd", 
     "dashboardPassword": "••••••••",
-    "defaultAction": "service"
+    "defaultAction": "service",
+    "web": true,
   },
   "owner": {
     "walletAddress": "0x1234...abcd"
@@ -94,6 +95,13 @@ X-Enterprise-API-Key: your-enterprise-api-key
 ```bash
 curl -X GET https://startsynqing.com/api/synq-keys/enterprise/preferences \
   -H "X-Enterprise-API-Key: your-api-key-here"
+
+**Preference Fields:**
+- `walletAddress`: Default wallet address for automatic CLI setup
+- `dashboardPassword`: Default dashboard password (masked for security)
+- `defaultAction`: Default action to execute (start/service/web)
+- `web`: Boolean to automatically start web dashboard if true
+
 ```
 
 ---
@@ -208,7 +216,7 @@ synchronize api
 - ✅ Optional synchronizer name input
 - ✅ Wallet address configuration
 - ✅ Dashboard password setup
-- ✅ Action selection (Start/Service/Quit)
+- ✅ Action selection (Start/Service/Web/Quit)
 - ✅ Automatic synq key generation
 - ✅ Complete CLI configuration
 
@@ -228,7 +236,7 @@ Automatically provision a synq key via Enterprise API
 ? Wallet address: 0x1234567890abcdef...
 ? Set a password for the web dashboard? Yes
 ? Dashboard password: ••••••••
-? What would you like to do next? [S]tart, Se[R]vice, [Q]uit: R
+? What would you like to do next? [S]tart, Se[R]vice, [W]eb, [Q]uit: R
 
 🎉 Enterprise API setup complete!
 ⚙️ Generating systemd service...
