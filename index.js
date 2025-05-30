@@ -3639,10 +3639,36 @@ async function setupViaEnterpriseAPI() {
       console.log(chalk.yellow('🔒 Dashboard password protection enabled'));
     }
     
-    console.log(chalk.gray('\n💡 You can now run:'));
-    console.log(chalk.gray('   synchronize start     # Start synchronizer'));
-    console.log(chalk.gray('   synchronize points    # View points'));
-    console.log(chalk.gray('   synchronize web       # Launch dashboard'));
+    // Ask what to do next
+    const nextActionQuestion = await inquirer.prompt([{
+      type: 'input',
+      name: 'action',
+      message: 'What would you like to do next? [S]tart, Se[R]vice, [Q]uit:',
+      default: 'start',
+      validate: (input) => {
+        const normalized = input.toLowerCase().trim();
+        if (['start', 's', 'service', 'r', 'quit', 'q'].includes(normalized)) {
+          return true;
+        }
+        return 'Please enter: Start/S, Service/R, or Quit/Q';
+      }
+    }]);
+
+    const action = nextActionQuestion.action.toLowerCase().trim();
+    
+    if (action === 'start' || action === 's') {
+      console.log(chalk.cyan('\n🚀 Starting synchronizer...'));
+      await start();
+    } else if (action === 'service' || action === 'r') {
+      console.log(chalk.cyan('\n⚙️ Generating systemd service...'));
+      await installService();
+    } else {
+      console.log(chalk.gray('\n💡 You can now run:'));
+      console.log(chalk.gray('   synchronize start     # Start synchronizer'));
+      console.log(chalk.gray('   synchronize service   # Generate systemd service'));
+      console.log(chalk.gray('   synchronize points    # View points'));
+      console.log(chalk.gray('   synchronize web       # Launch dashboard'));
+    }
 
   } catch (error) {
     console.error(chalk.red('❌ Enterprise API setup failed:'));
