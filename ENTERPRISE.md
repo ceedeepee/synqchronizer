@@ -379,6 +379,76 @@ spec:
               key: api-key
 ```
 
+#### **Scenario 5: Ready-to-Deploy Cloud Script**
+**Use the included startup-synchronizer.sh script for instant cloud deployment**
+
+The synchronizer-cli package includes a **production-ready startup script** specifically designed for cloud instances:
+
+📄 **File**: `startup-synchronizer.sh` (included in npm package)
+
+**Features:**
+- ✅ **Complete automation** - zero manual steps required
+- ✅ **Multi-cloud support** - AWS EC2, DigitalOcean, Google Cloud, Azure
+- ✅ **Enterprise API integration** - uses `synchronize --api` for hands-free setup
+- ✅ **Error handling** - exits on any failure for reliable deployments
+- ✅ **Progress indicators** - visual feedback during installation
+- ✅ **User management** - configurable for different cloud providers
+
+**Quick Deployment:**
+```bash
+# Download and customize the script
+curl -o startup-synchronizer.sh https://raw.githubusercontent.com/multisynq/synchronizer-cli/main/startup-synchronizer.sh
+
+# Replace API key placeholder
+sed -i 's/\[your-api-key\]/your-actual-enterprise-api-key-here/g' startup-synchronizer.sh
+
+# Deploy to EC2 instance (as User Data)
+aws ec2 run-instances \
+  --image-id ami-0abcdef1234567890 \
+  --instance-type t3.micro \
+  --user-data file://startup-synchronizer.sh
+
+# Or deploy to DigitalOcean droplet
+doctl compute droplet create synchronizer-node \
+  --size s-1vcpu-1gb \
+  --image ubuntu-20-04-x64 \
+  --user-data-file startup-synchronizer.sh
+```
+
+**Script Contents Preview:**
+```bash
+#!/bin/bash
+# startup-synchronizer.sh - Ready-to-deploy cloud startup script
+set -e  # Exit on any error
+
+echo "🚀 Starting Synchronizer Cloud Instance Setup..."
+
+# Update package list and install dependencies
+apt-get update -y
+apt-get install -y curl wget
+
+# Configure for your cloud provider
+USERNAME="ubuntu"  # Change to "root" for DigitalOcean
+
+# Install Node.js via NVM and synchronizer-cli
+su - $USERNAME -c "
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+  export NVM_DIR=\"/home/$USERNAME/.nvm\"
+  [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"
+  nvm install --lts
+  npm install -g synchronizer-cli
+  synchronize --api [your-api-key]  # Replace with your Enterprise API key
+"
+
+echo "✅ Synchronizer cloud instance setup complete!"
+```
+
+**Cloud Provider Customization:**
+- **AWS EC2**: Use as-is (username: `ubuntu`)
+- **DigitalOcean**: Change `USERNAME="ubuntu"` to `USERNAME="root"`
+- **Google Cloud**: Use as-is (username: `ubuntu`)
+- **Azure**: Use as-is (username: `azureuser`) or customize as needed
+
 ---
 
 ### **Enterprise CLI Features**
