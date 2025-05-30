@@ -1,44 +1,56 @@
 #!/bin/bash
-# startup-synchronizer.sh
-# Cloud instance user data script for automatic synchronizer deployment
-# Usage: Replace [your-api-key] with your actual Enterprise API key
+set -e
 
-set -e  # Exit on any error
+echo "🚀 Starting Synchronizer Setup..."
 
-echo "🚀 Starting Synchronizer Cloud Instance Setup..."
-
-# Update package list
-echo "📦 Updating package list..."
 apt-get update -y
+apt-get install -y curl wget gnupg lsb-release ca-certificates apt-transport-https
 
-# Install basic dependencies
-echo "🔧 Installing dependencies..."
-apt-get install -y curl wget
+# Install Docker
+echo "🐳 Installing Docker..."
+install_docker() {
+  mkdir -m 0755 -p /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+    https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+    > /etc/apt/sources.list.d/docker.list
 
-# Define the username (adjust for your cloud provider)
-USERNAME="ubuntu"  # EC2 default, change to "root" for DigitalOcean, etc.
+  apt-get update -y
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+}
+install_docker
 
-echo "👤 Setting up for user: $USERNAME"
+# Enable and start Docker
+systemctl enable docker
+systemctl start docker
 
-# Install NVM and Node.js as the specified user
+USERNAME="ubuntu"
+echo "👤 Adding $USERNAME to docker group..."
+usermod -aG docker $USERNAME
+
+# Preload Docker socket perms
+gpasswd -a $USERNAME docker
+newgrp docker << END
+echo "🔁 Docker group permissions applied in sub-shell"
+END
+
+# Run everything else as non-root user
 su - $USERNAME -c "
+  set -e
   echo '🟢 Installing NVM and Node.js...'
   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
   export NVM_DIR=\"/home/$USERNAME/.nvm\"
   [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"
-  
-  echo '📥 Installing latest Node.js LTS...'
+  [ -s \"\$NVM_DIR/bash_completion\" ] && . \"\$NVM_DIR/bash_completion\"
   nvm install --lts
   nvm use --lts
-  
+
   echo '⚡ Installing synchronizer-cli globally...'
   npm install -g synchronizer-cli
-  
-  echo '🏢 Running Enterprise API setup...'
+
+  echo '🏢 Running synchronizer with API key...'
   synchronize --api [your-api-key]
 "
 
-echo "✅ Synchronizer cloud instance setup complete!"
-echo "🎯 Your synchronizer should now be running automatically."
-echo "📊 Check status with: synchronize status"
-echo "💰 Check points with: synchronize points" 
+echo "✅ Setup complete. Docker and synchronizer are live."
