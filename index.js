@@ -144,61 +144,28 @@ function detectNpxPath() {
  */
 async function isNewDockerImageAvailable(imageName) {
   try {
-    console.log(chalk.gray(`Checking for updates to ${imageName}...`));
-    
-    // First check if we have the image locally
-    const localImageCmd = `docker images --quiet --digests ${imageName}`;
-    let localDigest = '';
-    
+    // Check if we have the image locally
     try {
-      localDigest = execSync(localImageCmd, { encoding: 'utf8', stdio: 'pipe' }).trim();
-      // If there's no local image, the output will be empty
-      if (!localDigest) {
-        console.log(chalk.yellow('No local image found, will pull latest version'));
+      const localImageCmd = `docker images ${imageName} --format "{{.ID}}"`;
+      const localImageId = execSync(localImageCmd, { encoding: 'utf8', stdio: 'pipe' }).trim();
+      
+      // If there's no local image, we need to pull
+      if (!localImageId) {
         return true;
       }
     } catch (error) {
-      // If there's an error checking for the local image, assume we need to pull
-      console.log(chalk.yellow('Unable to check local image, will pull latest version'));
+      // No local image found
       return true;
     }
     
-    // Now check the remote image digest
-    try {
-      // Need to log in to Docker Hub if the image is private
-      const remoteImageCmd = `docker manifest inspect ${imageName}`;
-      const remoteImageData = execSync(remoteImageCmd, { encoding: 'utf8', stdio: 'pipe' });
-      
-      // Extract the digest from the manifest inspect output
-      const remoteDigestMatch = remoteImageData.match(/"digest":\s*"([^"]+)"/);
-      if (!remoteDigestMatch || !remoteDigestMatch[1]) {
-        console.log(chalk.yellow('Unable to get remote digest, will pull to be safe'));
-        return true;
-      }
-      
-      const remoteDigest = remoteDigestMatch[1];
-      
-      // Extract only the digest part from the local output (format: IMAGE_ID DIGEST)
-      const localDigestParts = localDigest.split(' ');
-      const actualLocalDigest = localDigestParts.length > 1 ? localDigestParts[1] : localDigestParts[0];
-      
-      // Compare digests
-      if (actualLocalDigest && actualLocalDigest.includes(remoteDigest)) {
-        console.log(chalk.green('✅ Using latest Docker image version (no update needed)'));
-        return false;
-      } else {
-        console.log(chalk.blue('🔄 New Docker image version available, will update'));
-        return true;
-      }
-    } catch (error) {
-      // If there's an error checking the remote digest, assume we need to pull
-      console.log(chalk.yellow(`Cannot check for updates: ${error.message}`));
-      console.log(chalk.yellow('Will pull latest version to be safe'));
-      return true;
-    }
+    // For now, we'll use a simpler approach:
+    // Always pull with --pull always flag when starting containers
+    // This lets Docker handle the logic of whether to actually download
+    // Return false to avoid duplicate pulling attempts
+    return false;
+    
   } catch (error) {
-    // If any unexpected error occurs, be safe and pull the latest
-    console.log(chalk.yellow(`Error checking for image updates: ${error.message}`));
+    // On any error, assume we should try to pull
     return true;
   }
 }
@@ -773,10 +740,7 @@ async function installService() {
   const launcherWithVersion = `cli-${packageJson.version}/docker-2.1.3`;
   console.log(chalk.cyan(`Using launcher identifier: ${launcherWithVersion}`));
 
-  // Check if Docker image updates are available (this doesn't actually pull, just informs)
-  const imageName = 'cdrakep/synqchronizer:latest';
-  await isNewDockerImageAvailable(imageName);
-  console.log(chalk.cyan('Service will automatically check for image updates before each run'));
+  // No need to check for image updates here - the service will use --pull always
   
   // Build the exact same command as the start function
   const dockerArgs = [
@@ -2271,9 +2235,9 @@ async function getPerformanceData(config) {
           efficiency: efficiency === 0 ? 100 : efficiency === 1 ? 80 : 20
         };
         
-        console.log('Using real performance and QoS data from synchronizer container');
+        // Removed console.log about using real performance data
       } else {
-        console.log('Container not accessible, using fallback data');
+        // Removed console.log about container not accessible
         // Fallback to calculated values
         const randomFactor = () => 0.8 + (Math.random() * 0.4);
         performance = {
@@ -2397,12 +2361,10 @@ async function getPointsData(config) {
         }
       };
     } else {
-      console.log(chalk.yellow(`⚠️ Could not get points from registry API: ${registryData.error}`));
-      console.log(chalk.yellow('Falling back to container stats...'));
+      // Silently fall back to container stats
     }
   } catch (error) {
-    console.log(chalk.yellow(`⚠️ Error with registry API: ${error.message}`));
-    console.log(chalk.yellow('Falling back to container stats...'));
+    // Silently fall back to container stats
   }
 
   // If registry API fails, continue with existing container stats approach
@@ -2495,11 +2457,11 @@ async function getContainerStats() {
     }
     
     if (!containerName) {
-      console.log('No synchronizer container running');
+      // No synchronizer container running
       return null;
     }
     
-    console.log(`Found running container: ${containerName}`);
+    // Container is running, proceed with stats gathering
     
     // Check how long the container has been running
     const inspectOutput = execSync(`docker inspect ${containerName} --format "{{.State.StartedAt}}"`, {
@@ -2542,7 +2504,7 @@ async function getContainerStats() {
             const statsData = JSON.parse(jsonMatch[0]);
             if (statsData.syncLifePoints !== undefined || statsData.walletLifePoints !== undefined) {
               realStats = statsData;
-              console.log('Found real stats in container logs:', realStats);
+              // Removed console.log about found stats
               break;
             }
           }
@@ -2564,7 +2526,7 @@ async function getContainerStats() {
       }
       
     } catch (logError) {
-      console.log('Could not read container logs:', logError.message);
+      // Could not read container logs
     }
     
     // Try to execute a command inside the container to get stats
@@ -2582,7 +2544,7 @@ async function getContainerStats() {
           isEarningPoints = true;
         }
       } catch (execError) {
-        console.log('Could not execute command in container');
+        // Could not execute command in container
       }
     }
     
@@ -2595,14 +2557,14 @@ async function getContainerStats() {
       baseTraffic = realStats.syncLifeTraffic || realStats.bytesIn + realStats.bytesOut || 0;
       sessions = realStats.sessions || 0;
       users = realStats.users || 0;
-      console.log(`Using real container stats: ${basePoints} points, ${baseTraffic} traffic`);
+      // Removed console.log about using real container stats
     } else {
       // Calculate realistic stats based on actual container uptime and state
       basePoints = isEarningPoints ? Math.floor(uptimeHours * 10) : 0; // ~10 points per hour when working
       baseTraffic = isEarningPoints ? Math.floor(uptimeHours * 1024 * 1024 * 50) : 0; // ~50MB per hour
       sessions = isEarningPoints ? Math.floor(Math.random() * 5) + 1 : 0;
       users = isEarningPoints ? Math.floor(Math.random() * 3) + 1 : 0;
-      console.log(`Using calculated stats based on uptime: ${basePoints} points, ${baseTraffic} traffic`);
+      // Removed console.log about using calculated stats
     }
     
     // Return comprehensive stats that reflect actual container state
