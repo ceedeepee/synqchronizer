@@ -17,6 +17,11 @@ const CONFIG_DIR = path.join(os.homedir(), '.synchronizer-cli');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const POINTS_FILE = path.join(CONFIG_DIR, 'points.json');
 
+// Cache file for wallet points API responses
+const CACHE_FILE = path.join(CONFIG_DIR, 'wallet-points-cache.json');
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds for successful responses
+const ERROR_CACHE_DURATION = 30 * 1000; // 30 seconds for error responses
+
 function loadConfig() {
   if (fs.existsSync(CONFIG_FILE)) {
     return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
@@ -2311,7 +2316,7 @@ async function getPerformanceData(config) {
 }
 
 async function getPointsData(config) {
-  if (!config.key || !config.wallet) {
+  if (!config.wallet) {
     return {
       timestamp: new Date().toISOString(),
       points: {
@@ -2323,51 +2328,51 @@ async function getPointsData(config) {
         rank: 'N/A',
         multiplier: '1.0'
       },
-      error: 'Missing Synq key or wallet address'
+      error: 'Missing wallet address'
     };
   }
 
-  // First try to get real data from the registry API
+  // First try to get real data from the new simple API
   try {
-    const registryData = await fetchWalletLifetimePoints(config.key, config.wallet, config);
+    const apiData = await fetchWalletLifetimePoints(null, config.wallet, config);
     
-    if (registryData.success) {
-      console.log(chalk.green('✅ Retrieved real wallet lifetime points from registry API'));
+    if (apiData.success) {
+      console.log(chalk.green('✅ Retrieved real wallet lifetime points from API'));
       
       // Format the API data into our points structure
-      const apiData = registryData.data;
-      const walletLifePoints = apiData.lifetimePoints || 0;
+      const data = apiData.data;
+      const walletLifePoints = data.lifetimePoints || 0;
       
       // Create our standardized response format with real data
       return {
         timestamp: new Date().toISOString(),
         points: {
           total: walletLifePoints,
-          daily: apiData.dailyPoints || 0,
-          weekly: apiData.weeklyPoints || 0,
-          monthly: apiData.monthlyPoints || 0,
-          streak: apiData.streak || 0,
-          rank: apiData.rank || 'N/A',
-          multiplier: apiData.multiplier || '1.0'
+          daily: data.dailyPoints || 0,
+          weekly: data.weeklyPoints || 0,
+          monthly: data.monthlyPoints || 0,
+          streak: data.streak || 0,
+          rank: data.rank || 'N/A',
+          multiplier: data.multiplier || '1.0'
         },
-        source: apiData.source || 'registry_api',
+        source: data.source || 'api',
         // Include additional API data that might be useful
         apiExtras: {
-          lastWithdrawn: apiData.lastWithdrawn,
-          lastUpdated: apiData.lastUpdated,
-          activeSynchronizers: apiData.activeSynchronizers,
-          totalSessions: apiData.totalSessions,
-          totalTraffic: apiData.totalTraffic
+          lastWithdrawn: data.lastWithdrawn,
+          lastUpdated: data.lastUpdated,
+          activeSynchronizers: data.activeSynchronizers,
+          totalSessions: data.totalSessions,
+          totalTraffic: data.totalTraffic
         }
       };
     } else {
-      // Silently fall back to container stats
+      console.log(chalk.yellow(`⚠️ API failed: ${apiData.error}, falling back to container stats`));
     }
   } catch (error) {
-    // Silently fall back to container stats
+    console.log(chalk.yellow(`⚠️ API error: ${error.message}, falling back to container stats`));
   }
 
-  // If registry API fails, continue with existing container stats approach
+  // If API fails, continue with existing container stats approach
   try {
     const containerStats = await getContainerStats();
     
@@ -2393,7 +2398,7 @@ async function getPointsData(config) {
     const walletLifePoints = containerStats.walletLifePoints || 0;
     
     // For display purposes, calculate basic breakdown based on current running status
-    // Note: Real breakdown would come from registry API if available
+    // Note: Real breakdown would come from API if available
     const currentPoints = containerStats.isEarningPoints ? Math.floor(containerStats.uptimeHours || 0) : 0;
     
     return {
@@ -2507,6 +2512,25 @@ async function getContainerStats() {
               // Removed console.log about found stats
               break;
             }
+          }
+          
+          // Look for UPDATE_TALLIES messages from the registry
+          const updateTalliesMatch = line.match(/\{.*"what":\s*"UPDATE_TALLIES".*\}/);
+          if (updateTalliesMatch) {
+            const talliesData = JSON.parse(updateTalliesMatch[0]);
+            if (talliesData.walletPoints !== undefined) {
+              realStats = realStats || {};
+              realStats.walletLifePoints = talliesData.walletPoints;
+              realStats.syncLifePoints = talliesData.lifePoints || realStats.syncLifePoints;
+              realStats.syncLifeTraffic = talliesData.lifeTraffic || realStats.syncLifeTraffic;
+            }
+          }
+          
+          // Look for stats patterns with "walletPoints" (no "Life")
+          const walletPointsMatch = line.match(/walletPoints[:\s]+(\d+)/i);
+          if (walletPointsMatch) {
+            realStats = realStats || {};
+            realStats.walletLifePoints = parseInt(walletPointsMatch[1]);
           }
           
           // Also look for other stat patterns
@@ -2664,8 +2688,8 @@ async function showPoints() {
   console.log(chalk.yellow('Fetching points data...\n'));
 
   const config = loadConfig();
-  if (!config.key || !config.wallet) {
-    console.error(chalk.red('❌ Missing configuration. Run `synchronize init` first.'));
+  if (!config.wallet) {
+    console.error(chalk.red('❌ Missing wallet address. Run `synchronize init` first.'));
     process.exit(1);
   }
 
@@ -2674,7 +2698,9 @@ async function showPoints() {
     const containerStats = await getContainerStats();
     
     console.log(chalk.cyan(`🔗 Wallet: ${config.wallet}`));
-    console.log(chalk.cyan(`🔑 Sync Hash: ${config.syncHash}`));
+    if (config.syncHash) {
+      console.log(chalk.cyan(`🔑 Sync Hash: ${config.syncHash}`));
+    }
     console.log('');
     
     if (pointsData.error) {
@@ -2685,13 +2711,16 @@ async function showPoints() {
     } else {
       console.log(chalk.green('✅ Points data retrieved successfully'));
       
-      // Show the data source (registry API is more accurate than container stats)
-      if (pointsData.source === 'registry_api') {
-        console.log(chalk.green('🔗 Using real data from wallet registry API (most accurate)'));
-      } else if (pointsData.source === 'depin_registry_api') {
-        console.log(chalk.green('🔗 Using real data from DePIN registry API (accurate)'));
+      // Show the data source (API is more accurate than container stats)
+      if (pointsData.source === 'api') {
+        console.log(chalk.green('🔗 Using real data from wallet API (most accurate)'));
       } else if (pointsData.source === 'container_stats') {
         console.log(chalk.cyan('🐳 Using data from container stats'));
+        if (containerStats && !containerStats.hasRealStats) {
+          console.log(chalk.yellow('⚠️  Container is running but wallet points not found in logs'));
+          console.log(chalk.gray('   The synchronizer may still be connecting to the registry'));
+          console.log(chalk.gray('   Wait a few moments and try again'));
+        }
       } else {
         console.log(chalk.yellow('📊 Using calculated stats based on container uptime'));
       }
@@ -2710,10 +2739,10 @@ async function showPoints() {
     console.log(chalk.magenta(`🏆 Rank:            ${chalk.bold(points.rank)}`));
     console.log(chalk.cyan(`⚡ Multiplier:      ${chalk.bold(points.multiplier)}x`));
     
-    // Display registry API-specific details if available
-    if ((pointsData.source === 'registry_api' || pointsData.source === 'depin_registry_api') && pointsData.apiExtras) {
+    // Display API-specific details if available
+    if (pointsData.source === 'api' && pointsData.apiExtras) {
       console.log('');
-      console.log(chalk.bold('🌟 REGISTRY DETAILS:'));
+      console.log(chalk.bold('🌟 API DETAILS:'));
       console.log('');
       
       if (pointsData.apiExtras.lastWithdrawn !== undefined) {
@@ -2901,101 +2930,99 @@ async function validateSynqKey(keyToValidate) {
   }
 }
 
-// Add this after getPointsData function
 
 /**
- * Fetch real wallet lifetime points directly from the registry API
- * This uses the correct wallet API endpoint as defined in wallet.ts
- * @param {string} key The synq key
+ * Fetch real wallet lifetime points directly from the new simple API with caching
+ * @param {string} key The synq key (not needed for this API)
  * @param {string} wallet The wallet address
- * @param {object} config The full config object with syncHash and userName
+ * @param {object} config The full config object (not needed for this API)
  * @returns {Promise<{success: boolean, data?: any, error?: string}>} Result with points data
  */
 async function fetchWalletLifetimePoints(key, wallet, config = {}) {
-  if (!key || !wallet) {
-    return { success: false, error: 'Missing key or wallet' };
+  if (!wallet) {
+    return { success: false, error: 'Missing wallet address' };
   }
 
-  const DOMAIN = 'multisynq.io';
-  const REGISTRY_API_URL = `https://api.${DOMAIN}`;
+  // Load cache from disk
+  const cache = loadWalletPointsCache();
+  const cacheKey = wallet;
+  const cachedData = cache[cacheKey];
   
+  if (cachedData) {
+    const age = Date.now() - cachedData.timestamp;
+    const maxAge = cachedData.response.success ? CACHE_DURATION : ERROR_CACHE_DURATION;
+    
+    if (age < maxAge) {
+      const remaining = Math.floor((maxAge - age) / 1000);
+      const cacheType = cachedData.response.success ? 'cached' : 'cached error';
+      console.log(chalk.gray(`Using ${cacheType} wallet points data (${remaining}s remaining)`));
+      return cachedData.response;
+    }
+  }
+
   try {
-    console.log(chalk.gray(`Fetching wallet lifetime points from registry API...`));
+    console.log(chalk.gray(`Fetching wallet lifetime points from API...`));
     
-    // Use the wallet's /read endpoint as defined in wallet.ts
-    // The wallet.ts shows the endpoint returns: { serviceCredits, lastWithdrawnCredits, lastUpdated }
-    const url = `${REGISTRY_API_URL}/wallet/${wallet}/read`;
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Synq-Key': key, // Use the synq key for authentication
-        'User-Agent': `synchronizer-cli/${packageJson.version}`
-      }
-    });
+    // Use the simple new API endpoint
+    const response = await fetch(`https://www.startsynqing.com/api/external/multisynq/synqers/${wallet}`);
     
     if (!response.ok) {
-      // If we get a 404 or other error, try the DePIN registry endpoint
-      const depinUrl = `${REGISTRY_API_URL}/depin/wallet/${wallet}/read`;
-      
-      const depinResponse = await fetch(depinUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Synq-Key': key,
-          'User-Agent': `synchronizer-cli/${packageJson.version}`
-        }
-      });
-      
-      if (!depinResponse.ok) {
-        const errorText = await response.text();
-        return { 
-          success: false, 
-          error: `API error (${response.status}): ${errorText || 'Wallet not found'}` 
-        };
-      }
-      
-      const depinData = await depinResponse.json();
-      
-      // Transform the wallet API response to our format
-      return { 
-        success: true, 
-        data: {
-          lifetimePoints: depinData.serviceCredits || 0,
-          lastWithdrawn: depinData.lastWithdrawnCredits || 0,
-          lastUpdated: depinData.lastUpdated || Date.now(),
-          // Add calculated breakdown based on total points
-          dailyPoints: Math.floor((depinData.serviceCredits || 0) * 0.05),
-          weeklyPoints: Math.floor((depinData.serviceCredits || 0) * 0.2),
-          monthlyPoints: Math.floor((depinData.serviceCredits || 0) * 0.5),
-          source: 'depin_registry_api'
-        }
+      const errorResponse = { 
+        success: false, 
+        error: `API returned ${response.status}: ${response.statusText}` 
       };
+      
+      // Cache error responses for shorter duration to avoid hammering the API on failures
+      cache[cacheKey] = {
+        timestamp: Date.now(),
+        response: errorResponse
+      };
+      saveWalletPointsCache(cache);
+      
+      return errorResponse;
     }
     
     const data = await response.json();
     
-    // Transform the wallet API response to our format
-    // Based on wallet.ts: { serviceCredits, lastWithdrawnCredits, lastUpdated }
-    return { 
+    // Transform the API response to our format
+    const apiResponse = { 
       success: true, 
       data: {
-        lifetimePoints: data.serviceCredits || 0,
-        lastWithdrawn: data.lastWithdrawnCredits || 0,
+        lifetimePoints: data.lifetimePoints || data.serviceCredits || 0,
+        lastWithdrawn: data.lastWithdrawn || data.lastWithdrawnCredits || 0,
         lastUpdated: data.lastUpdated || Date.now(),
         // Add calculated breakdown based on total points
-        dailyPoints: Math.floor((data.serviceCredits || 0) * 0.05),
-        weeklyPoints: Math.floor((data.serviceCredits || 0) * 0.2),
-        monthlyPoints: Math.floor((data.serviceCredits || 0) * 0.5),
-        source: 'registry_api'
+        dailyPoints: Math.floor((data.lifetimePoints || data.serviceCredits || 0) * 0.05),
+        weeklyPoints: Math.floor((data.lifetimePoints || data.serviceCredits || 0) * 0.2),
+        monthlyPoints: Math.floor((data.lifetimePoints || data.serviceCredits || 0) * 0.5),
+        source: 'api',
+        // Include any additional data from the API
+        ...data
       }
     };
-  } catch (error) {
-    return { 
-      success: false, 
-      error: `Error fetching points: ${error.message}` 
+    
+    // Cache the successful response
+    cache[cacheKey] = {
+      timestamp: Date.now(),
+      response: apiResponse
     };
+    saveWalletPointsCache(cache);
+    
+    return apiResponse;
+  } catch (error) {
+    const errorResponse = { 
+      success: false, 
+      error: `Failed to fetch from API: ${error.message}` 
+    };
+    
+    // Cache error responses for shorter duration to avoid hammering the API on failures
+    cache[cacheKey] = {
+      timestamp: Date.now(),
+      response: errorResponse
+    };
+    saveWalletPointsCache(cache);
+    
+    return errorResponse;
   }
 }
 
@@ -3951,6 +3978,8 @@ program.command('api-auto').description('Automatic Enterprise API setup using AP
     process.exit(1);
   }
 });
+program.command('clear-cache').description('Clear wallet points cache to force fresh API data').action(clearWalletPointsCache);
+program.command('api').description('Quick setup via Enterprise API - automated provisioning').action(setupViaEnterpriseAPI);
 
 // Handle global --api option before parsing commands
 const options = program.opts();
@@ -3980,3 +4009,47 @@ if (process.argv.includes('--api')) {
 }
 
 program.parse(process.argv);
+
+/**
+ * Clear the wallet points cache (useful for testing or forcing fresh data)
+ */
+function clearWalletPointsCache() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      fs.unlinkSync(CACHE_FILE);
+    }
+    console.log(chalk.gray('Wallet points cache cleared'));
+  } catch (error) {
+    console.log(chalk.yellow(`Warning: Could not clear cache file: ${error.message}`));
+  }
+}
+
+/**
+ * Load wallet points cache from disk
+ */
+function loadWalletPointsCache() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const cacheData = fs.readFileSync(CACHE_FILE, 'utf8');
+      return JSON.parse(cacheData);
+    }
+  } catch (error) {
+    // If cache file is corrupted, ignore it
+  }
+  return {};
+}
+
+/**
+ * Save wallet points cache to disk
+ */
+function saveWalletPointsCache(cache) {
+  try {
+    // Ensure config directory exists
+    if (!fs.existsSync(CONFIG_DIR)) {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
+  } catch (error) {
+    // If cache save fails, ignore it (non-critical)
+  }
+}
