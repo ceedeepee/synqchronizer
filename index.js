@@ -4285,7 +4285,7 @@ program.command('test-nightly').description('Test nightly launch with direct Doc
   await performAutomaticUpdateCheck();
   return await testNightly();
 });
-program.command('check-updates').description('Check for Docker image updates manually').action(async () => {
+program.command('update-container').description('Check for Docker image updates manually').action(async () => {
   await performAutomaticUpdateCheck();
   return await checkImageUpdates();
 });
@@ -4308,7 +4308,11 @@ program.command('monitor-service').description('Generate systemd service file fo
     process.exit(1);
   }
 });
-program.command('update').description('Check for CLI updates and install automatically').action(updateCLI);
+program.command('update-cli').description('Check for CLI updates and install automatically').action(updateCLI);
+program.command('update').description('Check for all updates (CLI and Docker containers)').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await checkAllUpdates();
+});
 program.command('api').description('Set up synchronizer via Enterprise API').action(async () => {
   await performAutomaticUpdateCheck();
   return await setupViaEnterpriseAPI();
