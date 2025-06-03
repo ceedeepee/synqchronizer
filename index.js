@@ -3945,7 +3945,15 @@ program.name('synchronize')
     synchronize start         # Start synchronizer container
     synchronize nightly       # Run fixed nightly test version
     synchronize dashboard     # Launch web dashboard
-    synchronize check-updates # Check for Docker image updates`)
+    synchronize check-updates # Check for Docker image updates
+    synchronize web                # Launch web dashboard (auto ports
+    synchronize web --port 8080    # Launch with custom dashboard port
+    synchronize web -p 8080 -m 8081 # Custom dashboard and metrics ports
+    
+    # One-command deployment:
+    synchronize deploy -k <synq-key> -w <wallet-address>
+    synchronize deploy -k <synq-key> -w <wallet-address> -p 8080 -m 8081
+    synchronize deploy -k <synq-key> -w <wallet-address> --password <pwd> -n <name>`)
   .version(packageJson.version)
   .option('--api <key>', 'Automatic Enterprise API setup using API key and preferences');
 
@@ -3970,9 +3978,14 @@ program.command('service-web').description('Generate systemd service file for we
 });
 program.command('status').description('Show systemd service status and recent logs').action(showStatus);
 program.command('web')
-  .description('Start web dashboard and metrics server')
+  .description('Start web dashboard and metrics server with optional Enterprise API setup')
   .option('-p, --port <port>', 'Dashboard port (default: 3000)', parseInt)
   .option('-m, --metrics-port <port>', 'Metrics port (default: 3001)', parseInt)
+  .option('-a, --api <key>', 'Enterprise API key for automatic setup')
+  .option('-d, --dashboard-password <password>', 'Set dashboard password')
+  .option('-w, --wallet <address>', 'Wallet address')
+  .option('-s, --synchronizer-id <id>', 'Synchronizer ID (for existing configs)')
+  .option('-n, --synchronizer-name <name>', 'Synchronizer name (for display/reference)')
   .action(startWebGUI);
 program.command('install-docker').description('Install Docker automatically (Linux only)').action(installDocker);
 program.command('fix-docker').description('Fix Docker permissions (add user to docker group)').action(fixDockerPermissions);
@@ -4017,6 +4030,16 @@ program.command('api-auto').description('Automatic Enterprise API setup using AP
 });
 program.command('clear-cache').description('Clear wallet points cache to force fresh API data').action(clearWalletPointsCache);
 program.command('api').description('Quick setup via Enterprise API - automated provisioning').action(setupViaEnterpriseAPI);
+
+program.command('deploy')
+  .description('One-command deployment: configure, start synchronizer, and launch web dashboard')
+  .requiredOption('-k, --key <synq-key>', 'Synq key (required)')
+  .requiredOption('-w, --wallet <address>', 'Wallet address (required)')
+  .option('-n, --name <name>', 'Optional sync name for reference')
+  .option('-p, --port <port>', 'Dashboard port (default: 3000)', parseInt)
+  .option('-m, --metrics-port <port>', 'Metrics port (default: 3001)', parseInt)
+  .option('--password <password>', 'Dashboard password for security')
+  .action(deployAll);
 
 // Handle global --api option before parsing commands
 const options = program.opts();
@@ -4088,5 +4111,54 @@ function saveWalletPointsCache(cache) {
     fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
   } catch (error) {
     // If cache save fails, ignore it (non-critical)
+  }
+}
+
+async function deployAll(options) {
+  console.log(chalk.blue('🚀 Starting one-command deployment...'));
+  console.log(chalk.gray('Configuring synchronizer, starting container, and launching web dashboard\\n'));
+
+  try {
+    // 1. Create configuration from command line options
+    const config = {
+      synqKey: options.key,
+      walletAddress: options.wallet,
+      syncName: options.name || `sync-${Date.now()}`,
+      // Set dashboard password if provided
+      ...(options.password && { dashboardPassword: options.password })
+    };
+
+    // 2. Save the configuration
+    console.log(chalk.cyan('📝 Saving configuration...'));
+    const configDir = path.join(os.homedir(), '.synchronizer');
+    const configPath = path.join(configDir, 'config.json');
+    
+    // Ensure config directory exists
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+    
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    console.log(chalk.green('✅ Configuration saved successfully'));
+
+    // 3. Start the synchronizer container
+    console.log(chalk.cyan('🐳 Starting synchronizer container...'));
+    await start(); // Use existing start function
+    
+    // Wait a moment for container to initialize
+    console.log(chalk.gray('⏳ Waiting for container initialization...'));
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // 4. Start the web dashboard
+    console.log(chalk.cyan('🌐 Launching web dashboard...'));
+    const webOptions = {
+      port: options.port,
+      metricsPort: options.metricsPort
+    };
+    await startWebGUI(webOptions);
+
+  } catch (error) {
+    console.error(chalk.red('❌ Deployment failed:'), error.message);
+    process.exit(1);
   }
 }

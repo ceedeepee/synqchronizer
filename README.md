@@ -55,24 +55,58 @@ npm install -g synchronizer-cli
 ## Quick Start
 
 ```bash
-# 1. Configure your synchronizer
+# Interactive configuration (recommended for first-time users)
 synchronize init
 
-# OR use Enterprise API for automatic setup (enterprise users)
-synchronize --api <your-enterprise-api-key>
+# Or Enterprise API setup
+synchronize api
 
-# 2. Start the synchronizer
+# Or one-command deployment (perfect for automation)
+
+# Start synchronizer container
 synchronize start
 
-# 3. (Optional) Set up as a system service
-synchronize service
-
-# 4. Check service status and performance
-synchronize status
-
-# 5. Launch web dashboard with performance monitoring
+# Launch web dashboard
 synchronize web
 ```
+
+## 🚀 One-Command Deployment
+
+Perfect for automation, deployment scripts, and VPS installations:
+
+```bash
+# Basic deployment
+
+# Full deployment with all options
+  --key your-synq-key \
+  --wallet your-wallet-address \
+  --name "My Production Sync" \
+  --port 8080 \
+  --metrics-port 8081 \
+  --password secure-dashboard-password
+```
+
+### 🔧 Deploy Command Options
+
+- `--key <synq-key>` or `-k` - **Required:** Your Synq key
+- `--wallet <address>` or `-w` - **Required:** Your wallet address  
+- `--name <name>` or `-n` - *Optional:* Sync name for reference
+- `--port <port>` or `-p` - *Optional:* Dashboard port (default: 3000)
+- `--metrics-port <port>` or `-m` - *Optional:* Metrics port (default: 3001)  
+- `--password <password>` - *Optional:* Dashboard password for security
+
+**What it does:**
+1. 📝 Creates configuration from command line parameters
+2. 🐳 Starts synchronizer Docker container
+3. 🌐 Launches web dashboard on specified ports
+4. ✅ Ready to use in under 30 seconds
+
+**Perfect for:**
+- VPS deployments
+- CI/CD pipelines  
+- Automated setups
+- Docker environments
+- Quick testing
 
 ## Commands Reference
 
@@ -83,7 +117,7 @@ synchronize web
 | `synchronize service` | Generate systemd service file | Headless operation, auto-start configuration |
 | `synchronize service-web` | Generate web dashboard service | Persistent web monitoring, NPX path detection |
 | `synchronize status` | Show service status and logs | Color-coded status, recent logs, helpful commands |
-| `synchronize web` | Start web dashboard | Performance metrics, QoS monitoring, API docs |
+| `synchronize web` | Start web dashboard | Performance metrics, QoS monitoring, port configuration |
 | `synchronize install-docker` | Auto-install Docker (Linux) | Multi-distro support, service configuration |
 | `synchronize fix-docker` | Fix Docker permissions | User group management, permission troubleshooting |
 | `synchronize test-platform` | Test Docker compatibility | Platform testing, architecture validation |
@@ -317,6 +351,7 @@ When using the CLI, the launcher ID is automatically set to match the CLI versio
 
 ### Version History
 
+- **2.2.12**: Added Port config
 - **2.2.5**: Added cloud deployment startup script and enhanced Enterprise documentation
 - **2.2.4**: Enhanced Enterprise API integration with web interface support and automatic setup
 - **2.2.3**: Added Enterprise API integration with automatic synq key provisioning
