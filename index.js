@@ -4466,3 +4466,134 @@ async function deployAll(options) {
     process.exit(1);
   }
 }
+
+/**
+ * Check for both CLI and Docker container updates in a unified command
+ */
+async function checkAllUpdates() {
+  console.log(chalk.blue('🔄 Checking All Updates'));
+  console.log(chalk.yellow('Checking both CLI and Docker container updates...\n'));
+
+  let hasAnyUpdates = false;
+
+  // 1. Check CLI updates first
+  console.log(chalk.cyan('📦 Checking CLI Updates...'));
+  console.log(chalk.gray('─'.repeat(50)));
+  
+  const cliUpdateInfo = await checkForCLIUpdate();
+  
+  if (cliUpdateInfo.error) {
+    console.log(chalk.red(`❌ Error checking CLI updates: ${cliUpdateInfo.error}`));
+  } else {
+    console.log(chalk.blue(`Current CLI version: ${cliUpdateInfo.currentVersion}`));
+    console.log(chalk.blue(`Latest CLI version:  ${cliUpdateInfo.latestVersion}`));
+    
+    if (cliUpdateInfo.hasUpdate) {
+      hasAnyUpdates = true;
+      console.log(chalk.yellow(`🔄 CLI update available: ${cliUpdateInfo.currentVersion} → ${cliUpdateInfo.latestVersion}`));
+      
+      const shouldUpdateCLI = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'update',
+        message: 'Update CLI now?',
+        default: true
+      }]);
+      
+      if (shouldUpdateCLI.update) {
+        // Determine package manager
+        let packageManager = 'npm';
+        let installCommand = 'npm install -g synchronizer-cli@latest';
+        
+        try {
+          execSync('pnpm --version', { stdio: 'ignore' });
+          packageManager = 'pnpm';
+          installCommand = 'pnpm add -g synchronizer-cli@latest';
+        } catch (error) {
+          // Use npm
+        }
+        
+        try {
+          console.log(chalk.cyan(`⬇️ Updating CLI with ${packageManager}...`));
+          execSync(installCommand, { stdio: 'inherit' });
+          console.log(chalk.green('✅ CLI updated successfully!'));
+        } catch (error) {
+          console.log(chalk.red(`❌ CLI update failed: ${error.message}`));
+        }
+      }
+    } else {
+      console.log(chalk.green('✅ CLI is up to date'));
+    }
+  }
+
+  console.log(''); // Spacing
+
+  // 2. Check Docker container updates
+  console.log(chalk.cyan('🐳 Checking Docker Container Updates...'));
+  console.log(chalk.gray('─'.repeat(50)));
+
+  const images = [
+    { name: 'cdrakep/synqchronizer:latest', description: 'Main synchronizer image' },
+    { name: 'cdrakep/synqchronizer-test-fixed:latest', description: 'Fixed nightly test image' }
+  ];
+
+  let containerUpdatesAvailable = 0;
+
+  for (const image of images) {
+    console.log(chalk.gray(`Checking ${image.description}...`));
+    
+    try {
+      const hasUpdate = await isNewDockerImageAvailable(image.name);
+      
+      if (hasUpdate) {
+        hasAnyUpdates = true;
+        containerUpdatesAvailable++;
+        console.log(chalk.yellow(`🔄 Update available: ${image.name}`));
+        
+        const shouldPull = await inquirer.prompt([{
+          type: 'confirm',
+          name: 'pull',
+          message: `Pull latest version of ${image.name}?`,
+          default: true
+        }]);
+        
+        if (shouldPull.pull) {
+          try {
+            console.log(chalk.cyan(`⬇️ Pulling ${image.name}...`));
+            execSync(`docker pull ${image.name}`, { stdio: 'inherit' });
+            console.log(chalk.green(`✅ Successfully updated ${image.name}`));
+          } catch (error) {
+            console.log(chalk.red(`❌ Failed to pull ${image.name}: ${error.message}`));
+          }
+        }
+      } else {
+        console.log(chalk.green(`✅ ${image.name} is up to date`));
+      }
+    } catch (error) {
+      console.log(chalk.red(`❌ Error checking ${image.name}: ${error.message}`));
+    }
+  }
+
+  // 3. Summary
+  console.log(''); // Spacing
+  console.log(chalk.blue('📊 Update Summary:'));
+  console.log(chalk.gray('─'.repeat(30)));
+  
+  if (!hasAnyUpdates) {
+    console.log(chalk.green('✅ Everything is up to date!'));
+    console.log(chalk.gray('   • CLI: Latest version'));
+    console.log(chalk.gray('   • Containers: All images current'));
+  } else {
+    console.log(chalk.yellow('🔄 Updates were available'));
+    if (cliUpdateInfo.hasUpdate) {
+      console.log(chalk.gray('   • CLI: Update available'));
+    }
+    if (containerUpdatesAvailable > 0) {
+      console.log(chalk.gray(`   • Containers: ${containerUpdatesAvailable} image(s) had updates`));
+    }
+  }
+  
+  console.log('');
+  console.log(chalk.gray('💡 Individual update commands:'));
+  console.log(chalk.gray('   synchronize update-cli        # CLI updates only'));
+  console.log(chalk.gray('   synchronize update-container  # Container updates only'));
+}
