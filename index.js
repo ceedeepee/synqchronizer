@@ -1133,7 +1133,7 @@ function getPrimaryLocalIP() {
   return 'localhost';
 }
 
-async function startWebGUI() {
+async function startWebGUI(options = {}) {
   console.log(chalk.blue('🌐 Starting synchronizer Web GUI'));
   console.log(chalk.yellow('Setting up web dashboard and metrics endpoints...\n'));
 
@@ -1148,16 +1148,36 @@ async function startWebGUI() {
   // Get the primary local IP address
   const primaryIP = getPrimaryLocalIP();
   
-  // Find available ports with better logging
-  console.log(chalk.gray('🔍 Finding available ports...'));
-  const guiPort = await findAvailablePort(3000);
-  const metricsPort = await findAvailablePort(guiPort === 3001 ? 3002 : 3001);
+  // Use custom ports if provided, otherwise find available ports
+  let guiPort, metricsPort;
   
-  if (guiPort !== 3000) {
-    console.log(chalk.yellow(`⚠️  Port 3000 was busy, using port ${guiPort} for dashboard`));
+  if (options.port) {
+    guiPort = options.port;
+    console.log(chalk.cyan(`📌 Using custom dashboard port: ${guiPort}`));
+  } else {
+    console.log(chalk.gray('🔍 Finding available port for dashboard...'));
+    guiPort = await findAvailablePort(3000);
+    if (guiPort !== 3000) {
+      console.log(chalk.yellow(`⚠️  Port 3000 was busy, using port ${guiPort} for dashboard`));
+    }
   }
-  if (metricsPort !== 3001) {
-    console.log(chalk.yellow(`⚠️  Port 3001 was busy, using port ${metricsPort} for metrics`));
+  
+  if (options.metricsPort) {
+    metricsPort = options.metricsPort;
+    console.log(chalk.cyan(`📌 Using custom metrics port: ${metricsPort}`));
+  } else {
+    console.log(chalk.gray('🔍 Finding available port for metrics...'));
+    metricsPort = await findAvailablePort(options.port ? options.port + 1 : guiPort + 1);
+    if (metricsPort !== 3001) {
+      console.log(chalk.yellow(`⚠️  Port 3001 was busy, using port ${metricsPort} for metrics`));
+    }
+  }
+  
+  // Validate ports don't conflict
+  if (guiPort === metricsPort) {
+    console.error(chalk.red('❌ Error: Dashboard and metrics ports cannot be the same'));
+    console.log(chalk.gray('   Use different values for --port and --metrics-port'));
+    process.exit(1);
   }
   
   // Create Express apps
@@ -3887,6 +3907,19 @@ program.name('synchronize')
   • Quality of Service (QoS) monitoring
   • Built-in troubleshooting and permission fixes
   • Platform architecture detection (ARM64/AMD64)
+  
+🌐 WEB DASHBOARD:
+  • Real-time monitoring with performance metrics
+  • Custom port configuration (--port and --metrics-port options)
+  • Automatic port detection to prevent conflicts
+  • Password protection and authentication
+  • Quality of Service (QoS) indicators
+  • Wallet address and points tracking
+  • Docker image update monitoring
+  • Systemd service management
+  • Automatic update checking
+  • Background monitoring service
+  • Version tracking
 
 🏢 ENTERPRISE API:
   • Automatic synq key provisioning via Enterprise API
@@ -3936,7 +3969,11 @@ program.command('service-web').description('Generate systemd service file for we
   }
 });
 program.command('status').description('Show systemd service status and recent logs').action(showStatus);
-program.command('web').description('Start web dashboard and metrics server').action(startWebGUI);
+program.command('web')
+  .description('Start web dashboard and metrics server')
+  .option('-p, --port <port>', 'Dashboard port (default: 3000)', parseInt)
+  .option('-m, --metrics-port <port>', 'Metrics port (default: 3001)', parseInt)
+  .action(startWebGUI);
 program.command('install-docker').description('Install Docker automatically (Linux only)').action(installDocker);
 program.command('fix-docker').description('Fix Docker permissions (add user to docker group)').action(fixDockerPermissions);
 program.command('test-platform').description('Test Docker platform compatibility').action(testPlatform);

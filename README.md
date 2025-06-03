@@ -98,8 +98,31 @@ synchronize web
 The comprehensive web dashboard provides real-time monitoring and system insights:
 
 ```bash
+# Start with automatic port detection
 synchronize web
+
+# Use custom dashboard port
+synchronize web --port 8080
+
+# Use custom metrics port  
+synchronize web --metrics-port 8081
+
+# Use both custom ports
+synchronize web --port 8080 --metrics-port 8081
 ```
+
+### 🌐 Port Configuration
+
+**Automatic Port Detection** (default behavior):
+- Dashboard starts on port 3000, finds next available if busy
+- Metrics starts on dashboard port + 1, finds next available if busy
+- Prevents conflicts by ensuring different ports for each service
+
+**Manual Port Configuration**:
+- `--port <number>` or `-p <number>`: Set dashboard port
+- `--metrics-port <number>` or `-m <number>`: Set metrics port
+- CLI validates ports don't conflict and exits with error if they match
+- Useful for firewall rules, reverse proxies, or multi-instance deployments
 
 ### 🎨 Dashboard Features
 
@@ -138,7 +161,7 @@ The web dashboard runs on dual servers:
 - **Dashboard Server** (default port 3000): Main web interface
 - **Metrics Server** (default port 3001): JSON API endpoints
 
-*Automatic port detection prevents conflicts*
+*Automatic port detection prevents conflicts, or use custom ports with --port and --metrics-port options*
 
 ### 📡 API Endpoints
 
