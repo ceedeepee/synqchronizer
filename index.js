@@ -4204,9 +4204,28 @@ program.name('synchronize')
   .version(packageJson.version)
   .option('--api <key>', 'Automatic Enterprise API setup using API key and preferences');
 
-program.command('init').description('Interactive configuration').action(init);
-program.command('start').description('Build and run synchronizer Docker container').action(start);
-program.command('service').description('Generate systemd service file for headless service').action(installService);
+// Wrapper function to add automatic update checking to commands
+async function withUpdateCheck(commandFunction) {
+  return async function(...args) {
+    // Perform automatic update check before running the command
+    await performAutomaticUpdateCheck();
+    // Run the original command
+    return await commandFunction.apply(this, args);
+  };
+}
+
+program.command('init').description('Interactive configuration').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await init();
+});
+program.command('start').description('Build and run synchronizer Docker container').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await start();
+});
+program.command('service').description('Generate systemd service file for headless service').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await installService();
+});
 program.command('service-web').description('Generate systemd service file for web dashboard').action(async () => {
   try {
     const result = await installWebServiceFile();
