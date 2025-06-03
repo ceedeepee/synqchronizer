@@ -1701,7 +1701,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                     <div class="api-endpoint">
                         <span class="api-method">GET</span>
                         <span class="api-path">/api/check-updates</span>
-                        <span class="api-desc">Check for Docker image updates</span>
+                        <span class="api-desc">Check for Docker image updates (CLI: 'synchronize update-container')</span>
                     </div>
                     <div class="api-endpoint">
                         <span class="api-method">POST</span>
