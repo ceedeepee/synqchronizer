@@ -4227,6 +4227,7 @@ program.command('service').description('Generate systemd service file for headle
   return await installService();
 });
 program.command('service-web').description('Generate systemd service file for web dashboard').action(async () => {
+  await performAutomaticUpdateCheck();
   try {
     const result = await installWebServiceFile();
     console.log(chalk.green('✅ Web service file generated successfully!'));
@@ -4242,30 +4243,58 @@ program.command('service-web').description('Generate systemd service file for we
     process.exit(1);
   }
 });
-program.command('status').description('Show systemd service status and recent logs').action(showStatus);
-program.command('web')
-  .description('Start web dashboard and metrics server with optional Enterprise API setup')
-  .option('-p, --port <port>', 'Dashboard port (default: 3000)', parseInt)
-  .option('-m, --metrics-port <port>', 'Metrics port (default: 3001)', parseInt)
-  .option('-a, --api <key>', 'Enterprise API key for automatic setup')
-  .option('-d, --dashboard-password <password>', 'Set dashboard password')
-  .option('-w, --wallet <address>', 'Wallet address')
-  .option('-s, --synchronizer-id <id>', 'Synchronizer ID (for existing configs)')
-  .option('-n, --synchronizer-name <name>', 'Synchronizer name (for display/reference)')
-  .action(startWebGUI);
-program.command('install-docker').description('Install Docker automatically (Linux only)').action(installDocker);
-program.command('fix-docker').description('Fix Docker permissions (add user to docker group)').action(fixDockerPermissions);
-program.command('test-platform').description('Test Docker platform compatibility').action(testPlatform);
-program.command('points').description('Show wallet lifetime points and stats').action(showPoints);
-program.command('set-password').description('Set or change the dashboard password').action(setDashboardPassword);
+program.command('status').description('Show systemd service status and recent logs').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await showStatus();
+});
+program.command('web').description('Start web dashboard and metrics server').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await startWebGUI();
+});
+program.command('install-docker').description('Install Docker automatically (Linux only)').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await installDocker();
+});
+program.command('fix-docker').description('Fix Docker permissions (add user to docker group)').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await fixDockerPermissions();
+});
+program.command('test-platform').description('Test Docker platform compatibility').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await testPlatform();
+});
+program.command('points').description('Show wallet lifetime points and stats').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await showPoints();
+});
+program.command('set-password').description('Set or change the dashboard password').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await setDashboardPassword();
+});
 program.command('validate-key [key]')
   .description('Validate a synq key format and check availability with API')
-  .action(validateSynqKey);
-program.command('nightly').description('Start synchronizer with latest nightly test Docker image').action(startNightly);
-program.command('test-nightly').description('Test nightly launch with direct Docker command').action(testNightly);
-program.command('check-updates').description('Check for Docker image updates manually').action(checkImageUpdates);
-program.command('monitor').description('Start background monitoring for Docker image updates').action(startImageMonitoring);
+  .action(async (key) => {
+    await performAutomaticUpdateCheck();
+    return await validateSynqKey(key);
+  });
+program.command('nightly').description('Start synchronizer with latest nightly test Docker image').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await startNightly();
+});
+program.command('test-nightly').description('Test nightly launch with direct Docker command').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await testNightly();
+});
+program.command('check-updates').description('Check for Docker image updates manually').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await checkImageUpdates();
+});
+program.command('monitor').description('Start background monitoring for Docker image updates').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await startImageMonitoring();
+});
 program.command('monitor-service').description('Generate systemd service file for image monitoring').action(async () => {
+  await performAutomaticUpdateCheck();
   try {
     const result = await installImageMonitoringService();
     console.log(chalk.green('✅ Image monitoring service file generated successfully!'));
@@ -4279,8 +4308,13 @@ program.command('monitor-service').description('Generate systemd service file fo
     process.exit(1);
   }
 });
-program.command('api').description('Set up synchronizer via Enterprise API').action(setupViaEnterpriseAPI);
+program.command('update').description('Check for CLI updates and install automatically').action(updateCLI);
+program.command('api').description('Set up synchronizer via Enterprise API').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await setupViaEnterpriseAPI();
+});
 program.command('api-auto').description('Automatic Enterprise API setup using API preferences').action(async () => {
+  await performAutomaticUpdateCheck();
   try {
     const apiKey = await inquirer.prompt([{
       type: 'password',
