@@ -3420,7 +3420,7 @@ async function startImageMonitoring() {
     } else {
       console.log(chalk.yellow(`🔄 Found ${updatesFound} image(s) with updates`));
       if (!monitoringConfig.autoUpdate) {
-        console.log(chalk.gray('   Run `synchronize check-updates` to update manually'));
+        console.log(chalk.gray('   Run `synchronize update-container` to update manually'));
       }
     }
     
@@ -4174,9 +4174,10 @@ program.name('synchronize')
   • Automated configuration with API-generated keys
   • Hands-free setup using API preferences (--api option)
 
-🔄 DOCKER IMAGE MONITORING:
+🔄 UPDATE MANAGEMENT:
+  • Unified update checking for CLI and Docker containers
   • Automatic update checking every 30-60 minutes
-  • Manual update checking with interactive pulls
+  • Manual update checking with interactive installation
   • Background monitoring service with systemd integration
   • Version tracking with CLI version / Docker version format
 
@@ -4186,14 +4187,16 @@ program.name('synchronize')
   • Enhanced logging with versioned container information
 
 💡 QUICK START:
-    synchronize init          # Interactive configuration (manual)
-    synchronize api           # Enterprise API setup (interactive)
-    synchronize --api <key>   # Enterprise API setup (automatic)
-    synchronize start         # Start synchronizer container
-    synchronize nightly       # Run fixed nightly test version
-    synchronize dashboard     # Launch web dashboard
-    synchronize check-updates # Check for Docker image updates
-    synchronize web                # Launch web dashboard (auto ports
+    synchronize init              # Interactive configuration (manual)
+    synchronize api               # Enterprise API setup (interactive)
+    synchronize --api <key>       # Enterprise API setup (automatic)
+    synchronize start             # Start synchronizer container
+    synchronize nightly           # Run fixed nightly test version
+    synchronize dashboard         # Launch web dashboard
+    synchronize update            # Check for all updates (CLI + containers)
+    synchronize update-cli        # Check for CLI updates only
+    synchronize update-container  # Check for container updates only
+    synchronize web                # Launch web dashboard (auto ports)
     synchronize web --port 8080    # Launch with custom dashboard port
     synchronize web -p 8080 -m 8081 # Custom dashboard and metrics ports
     
