@@ -16,6 +16,7 @@ const program = new Command();
 const CONFIG_DIR = path.join(os.homedir(), '.synchronizer-cli');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const POINTS_FILE = path.join(CONFIG_DIR, 'points.json');
+const UPDATE_CHECK_FILE = path.join(CONFIG_DIR, 'update-check.json');
 
 // Cache file for wallet points API responses
 const CACHE_FILE = path.join(CONFIG_DIR, 'wallet-points-cache.json');
@@ -3889,6 +3890,252 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
     }
     
     process.exit(1);
+  }
+}
+
+/**
+ * Check if a new version of synchronizer-cli is available on npm
+ * @returns {Promise<{hasUpdate: boolean, currentVersion: string, latestVersion?: string, error?: string}>}
+ */
+async function checkForCLIUpdate() {
+  try {
+    const currentVersion = packageJson.version;
+    
+    // Fetch latest version from npm registry
+    const response = await fetch('https://registry.npmjs.org/synchronizer-cli/latest');
+    
+    if (!response.ok) {
+      return {
+        hasUpdate: false,
+        currentVersion,
+        error: `Failed to check npm registry (${response.status})`
+      };
+    }
+    
+    const data = await response.json();
+    const latestVersion = data.version;
+    
+    // Compare versions using simple string comparison for now
+    // This works for semantic versioning when properly formatted
+    const hasUpdate = compareVersions(currentVersion, latestVersion) < 0;
+    
+    return {
+      hasUpdate,
+      currentVersion,
+      latestVersion,
+      publishedAt: data.time ? data.time[latestVersion] : null
+    };
+  } catch (error) {
+    return {
+      hasUpdate: false,
+      currentVersion: packageJson.version,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Simple version comparison function
+ * Returns: -1 if v1 < v2, 0 if v1 === v2, 1 if v1 > v2
+ * @param {string} v1 First version
+ * @param {string} v2 Second version
+ * @returns {number} Comparison result
+ */
+function compareVersions(v1, v2) {
+  const parts1 = v1.split('.').map(Number);
+  const parts2 = v2.split('.').map(Number);
+  
+  const maxLength = Math.max(parts1.length, parts2.length);
+  
+  for (let i = 0; i < maxLength; i++) {
+    const part1 = parts1[i] || 0;
+    const part2 = parts2[i] || 0;
+    
+    if (part1 < part2) return -1;
+    if (part1 > part2) return 1;
+  }
+  
+  return 0;
+}
+
+/**
+ * Load update check data from file
+ * @returns {object} Update check data with lastChecked timestamp
+ */
+function loadUpdateCheckData() {
+  if (fs.existsSync(UPDATE_CHECK_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(UPDATE_CHECK_FILE, 'utf8'));
+    } catch (error) {
+      return { lastChecked: null };
+    }
+  }
+  return { lastChecked: null };
+}
+
+/**
+ * Save update check data to file
+ * @param {object} data Update check data
+ */
+function saveUpdateCheckData(data) {
+  if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+  fs.writeFileSync(UPDATE_CHECK_FILE, JSON.stringify(data, null, 2));
+}
+
+/**
+ * Check if we should perform an update check (once per day)
+ * @returns {boolean} True if we should check for updates
+ */
+function shouldCheckForUpdates() {
+  const updateData = loadUpdateCheckData();
+  
+  if (!updateData.lastChecked) {
+    return true;
+  }
+  
+  const lastChecked = new Date(updateData.lastChecked);
+  const now = new Date();
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  
+  return lastChecked < oneDayAgo;
+}
+
+/**
+ * Perform automatic update check and display notification if update available
+ * This runs silently in the background and only shows a message if an update is found
+ */
+async function performAutomaticUpdateCheck() {
+  if (!shouldCheckForUpdates()) {
+    return;
+  }
+  
+  try {
+    const updateInfo = await checkForCLIUpdate();
+    
+    // Save that we checked today
+    saveUpdateCheckData({
+      lastChecked: new Date().toISOString(),
+      lastResult: updateInfo
+    });
+    
+    // Only show message if there's an update available
+    if (updateInfo.hasUpdate) {
+      console.log(chalk.yellow('\n🔔 UPDATE AVAILABLE!'));
+      console.log(chalk.cyan(`   Current version: ${updateInfo.currentVersion}`));
+      console.log(chalk.green(`   Latest version:  ${updateInfo.latestVersion}`));
+      console.log(chalk.gray('   Run `synchronize update` to update automatically'));
+      console.log(chalk.gray('   Or: npm install -g synchronizer-cli@latest\n'));
+    }
+  } catch (error) {
+    // Silently fail automatic checks - don't bother the user
+  }
+}
+
+/**
+ * Manual update command - check for updates and optionally install
+ */
+async function updateCLI() {
+  console.log(chalk.blue('🔄 Synchronizer CLI Update Check'));
+  console.log(chalk.yellow('Checking for updates...\n'));
+  
+  const updateInfo = await checkForCLIUpdate();
+  
+  if (updateInfo.error) {
+    console.log(chalk.red(`❌ Error checking for updates: ${updateInfo.error}`));
+    return;
+  }
+  
+  console.log(chalk.cyan(`📦 Current version: ${updateInfo.currentVersion}`));
+  console.log(chalk.cyan(`📦 Latest version:  ${updateInfo.latestVersion}`));
+  
+  if (updateInfo.publishedAt) {
+    console.log(chalk.gray(`📅 Published: ${new Date(updateInfo.publishedAt).toLocaleDateString()}`));
+  }
+  
+  if (!updateInfo.hasUpdate) {
+    console.log(chalk.green('\n✅ You are running the latest version!'));
+    
+    // Update the last checked timestamp
+    saveUpdateCheckData({
+      lastChecked: new Date().toISOString(),
+      lastResult: updateInfo
+    });
+    
+    return;
+  }
+  
+  console.log(chalk.yellow(`\n🔄 Update available: ${updateInfo.currentVersion} → ${updateInfo.latestVersion}`));
+  
+  // Ask if user wants to update
+  const shouldUpdate = await inquirer.prompt([{
+    type: 'confirm',
+    name: 'update',
+    message: 'Would you like to update now?',
+    default: true
+  }]);
+  
+  if (!shouldUpdate.update) {
+    console.log(chalk.gray('Update cancelled. You can update later with:'));
+    console.log(chalk.gray('  synchronize update'));
+    console.log(chalk.gray('  npm install -g synchronizer-cli@latest'));
+    return;
+  }
+  
+  // Determine which package manager to use
+  let packageManager = 'npm';
+  let installCommand = 'npm install -g synchronizer-cli@latest';
+  
+  // Check if pnpm is available (following user's preference for pnpm)
+  try {
+    execSync('pnpm --version', { stdio: 'ignore' });
+    packageManager = 'pnpm';
+    installCommand = 'pnpm add -g synchronizer-cli@latest';
+    console.log(chalk.cyan('🚀 Using pnpm for update...'));
+  } catch (error) {
+    console.log(chalk.cyan('📦 Using npm for update...'));
+  }
+  
+  try {
+    console.log(chalk.cyan(`\n⬇️ Installing synchronizer-cli@${updateInfo.latestVersion}...`));
+    console.log(chalk.gray(`Running: ${installCommand}`));
+    
+    // Run the install command
+    execSync(installCommand, { 
+      stdio: 'inherit',
+      env: { ...process.env }
+    });
+    
+    console.log(chalk.green(`\n✅ Successfully updated to version ${updateInfo.latestVersion}!`));
+    console.log(chalk.blue('🎉 You can now use the latest features and improvements.'));
+    
+    // Update the last checked timestamp
+    saveUpdateCheckData({
+      lastChecked: new Date().toISOString(),
+      lastResult: {
+        ...updateInfo,
+        hasUpdate: false,
+        currentVersion: updateInfo.latestVersion
+      }
+    });
+    
+    // Show what's new if we have release notes
+    console.log(chalk.gray('\n💡 Check the changelog at: https://github.com/multisynq/synchronizer-cli/releases'));
+    
+  } catch (error) {
+    console.error(chalk.red('\n❌ Update failed:'), error.message);
+    console.error(chalk.yellow('\n🔧 You can try updating manually:'));
+    console.error(chalk.gray(`   ${installCommand}`));
+    console.error(chalk.gray('   Or: npm uninstall -g synchronizer-cli && npm install -g synchronizer-cli'));
+    
+    // Check if it's a permission error
+    if (error.message.includes('EACCES') || error.message.includes('permission denied')) {
+      console.error(chalk.blue('\n🔐 Permission Error Solutions:'));
+      console.error(chalk.gray('   • Run with sudo: sudo ' + installCommand));
+      console.error(chalk.gray('   • Configure npm to use a different directory'));
+      console.error(chalk.gray('   • Use a Node version manager like nvm'));
+    }
   }
 }
 
