@@ -16,6 +16,7 @@ const program = new Command();
 const CONFIG_DIR = path.join(os.homedir(), '.synchronizer-cli');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const POINTS_FILE = path.join(CONFIG_DIR, 'points.json');
+const UPDATE_CHECK_FILE = path.join(CONFIG_DIR, 'update-check.json');
 
 // Cache file for wallet points API responses
 const CACHE_FILE = path.join(CONFIG_DIR, 'wallet-points-cache.json');
@@ -1700,7 +1701,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                     <div class="api-endpoint">
                         <span class="api-method">GET</span>
                         <span class="api-path">/api/check-updates</span>
-                        <span class="api-desc">Check for Docker image updates</span>
+                        <span class="api-desc">Check for Docker image updates (CLI: 'synchronize update-container')</span>
                     </div>
                     <div class="api-endpoint">
                         <span class="api-method">POST</span>
@@ -3419,7 +3420,7 @@ async function startImageMonitoring() {
     } else {
       console.log(chalk.yellow(`🔄 Found ${updatesFound} image(s) with updates`));
       if (!monitoringConfig.autoUpdate) {
-        console.log(chalk.gray('   Run `synchronize check-updates` to update manually'));
+        console.log(chalk.gray('   Run `synchronize update-container` to update manually'));
       }
     }
     
@@ -3892,6 +3893,252 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
   }
 }
 
+/**
+ * Check if a new version of synchronizer-cli is available on npm
+ * @returns {Promise<{hasUpdate: boolean, currentVersion: string, latestVersion?: string, error?: string}>}
+ */
+async function checkForCLIUpdate() {
+  try {
+    const currentVersion = packageJson.version;
+    
+    // Fetch latest version from npm registry
+    const response = await fetch('https://registry.npmjs.org/synchronizer-cli/latest');
+    
+    if (!response.ok) {
+      return {
+        hasUpdate: false,
+        currentVersion,
+        error: `Failed to check npm registry (${response.status})`
+      };
+    }
+    
+    const data = await response.json();
+    const latestVersion = data.version;
+    
+    // Compare versions using simple string comparison for now
+    // This works for semantic versioning when properly formatted
+    const hasUpdate = compareVersions(currentVersion, latestVersion) < 0;
+    
+    return {
+      hasUpdate,
+      currentVersion,
+      latestVersion,
+      publishedAt: data.time ? data.time[latestVersion] : null
+    };
+  } catch (error) {
+    return {
+      hasUpdate: false,
+      currentVersion: packageJson.version,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Simple version comparison function
+ * Returns: -1 if v1 < v2, 0 if v1 === v2, 1 if v1 > v2
+ * @param {string} v1 First version
+ * @param {string} v2 Second version
+ * @returns {number} Comparison result
+ */
+function compareVersions(v1, v2) {
+  const parts1 = v1.split('.').map(Number);
+  const parts2 = v2.split('.').map(Number);
+  
+  const maxLength = Math.max(parts1.length, parts2.length);
+  
+  for (let i = 0; i < maxLength; i++) {
+    const part1 = parts1[i] || 0;
+    const part2 = parts2[i] || 0;
+    
+    if (part1 < part2) return -1;
+    if (part1 > part2) return 1;
+  }
+  
+  return 0;
+}
+
+/**
+ * Load update check data from file
+ * @returns {object} Update check data with lastChecked timestamp
+ */
+function loadUpdateCheckData() {
+  if (fs.existsSync(UPDATE_CHECK_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(UPDATE_CHECK_FILE, 'utf8'));
+    } catch (error) {
+      return { lastChecked: null };
+    }
+  }
+  return { lastChecked: null };
+}
+
+/**
+ * Save update check data to file
+ * @param {object} data Update check data
+ */
+function saveUpdateCheckData(data) {
+  if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+  fs.writeFileSync(UPDATE_CHECK_FILE, JSON.stringify(data, null, 2));
+}
+
+/**
+ * Check if we should perform an update check (once per day)
+ * @returns {boolean} True if we should check for updates
+ */
+function shouldCheckForUpdates() {
+  const updateData = loadUpdateCheckData();
+  
+  if (!updateData.lastChecked) {
+    return true;
+  }
+  
+  const lastChecked = new Date(updateData.lastChecked);
+  const now = new Date();
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  
+  return lastChecked < oneDayAgo;
+}
+
+/**
+ * Perform automatic update check and display notification if update available
+ * This runs silently in the background and only shows a message if an update is found
+ */
+async function performAutomaticUpdateCheck() {
+  if (!shouldCheckForUpdates()) {
+    return;
+  }
+  
+  try {
+    const updateInfo = await checkForCLIUpdate();
+    
+    // Save that we checked today
+    saveUpdateCheckData({
+      lastChecked: new Date().toISOString(),
+      lastResult: updateInfo
+    });
+    
+    // Only show message if there's an update available
+    if (updateInfo.hasUpdate) {
+      console.log(chalk.yellow('\n🔔 UPDATE AVAILABLE!'));
+      console.log(chalk.cyan(`   Current version: ${updateInfo.currentVersion}`));
+      console.log(chalk.green(`   Latest version:  ${updateInfo.latestVersion}`));
+      console.log(chalk.gray('   Run `synchronize update` to update automatically'));
+      console.log(chalk.gray('   Or: npm install -g synchronizer-cli@latest\n'));
+    }
+  } catch (error) {
+    // Silently fail automatic checks - don't bother the user
+  }
+}
+
+/**
+ * Manual update command - check for updates and optionally install
+ */
+async function updateCLI() {
+  console.log(chalk.blue('🔄 Synchronizer CLI Update Check'));
+  console.log(chalk.yellow('Checking for updates...\n'));
+  
+  const updateInfo = await checkForCLIUpdate();
+  
+  if (updateInfo.error) {
+    console.log(chalk.red(`❌ Error checking for updates: ${updateInfo.error}`));
+    return;
+  }
+  
+  console.log(chalk.cyan(`📦 Current version: ${updateInfo.currentVersion}`));
+  console.log(chalk.cyan(`📦 Latest version:  ${updateInfo.latestVersion}`));
+  
+  if (updateInfo.publishedAt) {
+    console.log(chalk.gray(`📅 Published: ${new Date(updateInfo.publishedAt).toLocaleDateString()}`));
+  }
+  
+  if (!updateInfo.hasUpdate) {
+    console.log(chalk.green('\n✅ You are running the latest version!'));
+    
+    // Update the last checked timestamp
+    saveUpdateCheckData({
+      lastChecked: new Date().toISOString(),
+      lastResult: updateInfo
+    });
+    
+    return;
+  }
+  
+  console.log(chalk.yellow(`\n🔄 Update available: ${updateInfo.currentVersion} → ${updateInfo.latestVersion}`));
+  
+  // Ask if user wants to update
+  const shouldUpdate = await inquirer.prompt([{
+    type: 'confirm',
+    name: 'update',
+    message: 'Would you like to update now?',
+    default: true
+  }]);
+  
+  if (!shouldUpdate.update) {
+    console.log(chalk.gray('Update cancelled. You can update later with:'));
+    console.log(chalk.gray('  synchronize update'));
+    console.log(chalk.gray('  npm install -g synchronizer-cli@latest'));
+    return;
+  }
+  
+  // Determine which package manager to use
+  let packageManager = 'npm';
+  let installCommand = 'npm install -g synchronizer-cli@latest';
+  
+  // Check if pnpm is available (following user's preference for pnpm)
+  try {
+    execSync('pnpm --version', { stdio: 'ignore' });
+    packageManager = 'pnpm';
+    installCommand = 'pnpm add -g synchronizer-cli@latest';
+    console.log(chalk.cyan('🚀 Using pnpm for update...'));
+  } catch (error) {
+    console.log(chalk.cyan('📦 Using npm for update...'));
+  }
+  
+  try {
+    console.log(chalk.cyan(`\n⬇️ Installing synchronizer-cli@${updateInfo.latestVersion}...`));
+    console.log(chalk.gray(`Running: ${installCommand}`));
+    
+    // Run the install command
+    execSync(installCommand, { 
+      stdio: 'inherit',
+      env: { ...process.env }
+    });
+    
+    console.log(chalk.green(`\n✅ Successfully updated to version ${updateInfo.latestVersion}!`));
+    console.log(chalk.blue('🎉 You can now use the latest features and improvements.'));
+    
+    // Update the last checked timestamp
+    saveUpdateCheckData({
+      lastChecked: new Date().toISOString(),
+      lastResult: {
+        ...updateInfo,
+        hasUpdate: false,
+        currentVersion: updateInfo.latestVersion
+      }
+    });
+    
+    // Show what's new if we have release notes
+    console.log(chalk.gray('\n💡 Check the changelog at: https://github.com/multisynq/synchronizer-cli/releases'));
+    
+  } catch (error) {
+    console.error(chalk.red('\n❌ Update failed:'), error.message);
+    console.error(chalk.yellow('\n🔧 You can try updating manually:'));
+    console.error(chalk.gray(`   ${installCommand}`));
+    console.error(chalk.gray('   Or: npm uninstall -g synchronizer-cli && npm install -g synchronizer-cli'));
+    
+    // Check if it's a permission error
+    if (error.message.includes('EACCES') || error.message.includes('permission denied')) {
+      console.error(chalk.blue('\n🔐 Permission Error Solutions:'));
+      console.error(chalk.gray('   • Run with sudo: sudo ' + installCommand));
+      console.error(chalk.gray('   • Configure npm to use a different directory'));
+      console.error(chalk.gray('   • Use a Node version manager like nvm'));
+    }
+  }
+}
+
 program.name('synchronize')
   .description(`🚀 Synchronizer v${packageJson.version} - Complete CLI Toolkit for Multisynq Synchronizer
 
@@ -3927,9 +4174,10 @@ program.name('synchronize')
   • Automated configuration with API-generated keys
   • Hands-free setup using API preferences (--api option)
 
-🔄 DOCKER IMAGE MONITORING:
+🔄 UPDATE MANAGEMENT:
+  • Unified update checking for CLI and Docker containers
   • Automatic update checking every 30-60 minutes
-  • Manual update checking with interactive pulls
+  • Manual update checking with interactive installation
   • Background monitoring service with systemd integration
   • Version tracking with CLI version / Docker version format
 
@@ -3939,14 +4187,16 @@ program.name('synchronize')
   • Enhanced logging with versioned container information
 
 💡 QUICK START:
-    synchronize init          # Interactive configuration (manual)
-    synchronize api           # Enterprise API setup (interactive)
-    synchronize --api <key>   # Enterprise API setup (automatic)
-    synchronize start         # Start synchronizer container
-    synchronize nightly       # Run fixed nightly test version
-    synchronize dashboard     # Launch web dashboard
-    synchronize check-updates # Check for Docker image updates
-    synchronize web                # Launch web dashboard (auto ports
+    synchronize init              # Interactive configuration (manual)
+    synchronize api               # Enterprise API setup (interactive)
+    synchronize --api <key>       # Enterprise API setup (automatic)
+    synchronize start             # Start synchronizer container
+    synchronize nightly           # Run fixed nightly test version
+    synchronize dashboard         # Launch web dashboard
+    synchronize update            # Check for all updates (CLI + containers)
+    synchronize update-cli        # Check for CLI updates only
+    synchronize update-container  # Check for container updates only
+    synchronize web                # Launch web dashboard (auto ports)
     synchronize web --port 8080    # Launch with custom dashboard port
     synchronize web -p 8080 -m 8081 # Custom dashboard and metrics ports
     
@@ -3957,10 +4207,30 @@ program.name('synchronize')
   .version(packageJson.version)
   .option('--api <key>', 'Automatic Enterprise API setup using API key and preferences');
 
-program.command('init').description('Interactive configuration').action(init);
-program.command('start').description('Build and run synchronizer Docker container').action(start);
-program.command('service').description('Generate systemd service file for headless service').action(installService);
+// Wrapper function to add automatic update checking to commands
+async function withUpdateCheck(commandFunction) {
+  return async function(...args) {
+    // Perform automatic update check before running the command
+    await performAutomaticUpdateCheck();
+    // Run the original command
+    return await commandFunction.apply(this, args);
+  };
+}
+
+program.command('init').description('Interactive configuration').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await init();
+});
+program.command('start').description('Build and run synchronizer Docker container').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await start();
+});
+program.command('service').description('Generate systemd service file for headless service').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await installService();
+});
 program.command('service-web').description('Generate systemd service file for web dashboard').action(async () => {
+  await performAutomaticUpdateCheck();
   try {
     const result = await installWebServiceFile();
     console.log(chalk.green('✅ Web service file generated successfully!'));
@@ -3976,30 +4246,58 @@ program.command('service-web').description('Generate systemd service file for we
     process.exit(1);
   }
 });
-program.command('status').description('Show systemd service status and recent logs').action(showStatus);
-program.command('web')
-  .description('Start web dashboard and metrics server with optional Enterprise API setup')
-  .option('-p, --port <port>', 'Dashboard port (default: 3000)', parseInt)
-  .option('-m, --metrics-port <port>', 'Metrics port (default: 3001)', parseInt)
-  .option('-a, --api <key>', 'Enterprise API key for automatic setup')
-  .option('-d, --dashboard-password <password>', 'Set dashboard password')
-  .option('-w, --wallet <address>', 'Wallet address')
-  .option('-s, --synchronizer-id <id>', 'Synchronizer ID (for existing configs)')
-  .option('-n, --synchronizer-name <name>', 'Synchronizer name (for display/reference)')
-  .action(startWebGUI);
-program.command('install-docker').description('Install Docker automatically (Linux only)').action(installDocker);
-program.command('fix-docker').description('Fix Docker permissions (add user to docker group)').action(fixDockerPermissions);
-program.command('test-platform').description('Test Docker platform compatibility').action(testPlatform);
-program.command('points').description('Show wallet lifetime points and stats').action(showPoints);
-program.command('set-password').description('Set or change the dashboard password').action(setDashboardPassword);
+program.command('status').description('Show systemd service status and recent logs').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await showStatus();
+});
+program.command('web').description('Start web dashboard and metrics server').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await startWebGUI();
+});
+program.command('install-docker').description('Install Docker automatically (Linux only)').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await installDocker();
+});
+program.command('fix-docker').description('Fix Docker permissions (add user to docker group)').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await fixDockerPermissions();
+});
+program.command('test-platform').description('Test Docker platform compatibility').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await testPlatform();
+});
+program.command('points').description('Show wallet lifetime points and stats').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await showPoints();
+});
+program.command('set-password').description('Set or change the dashboard password').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await setDashboardPassword();
+});
 program.command('validate-key [key]')
   .description('Validate a synq key format and check availability with API')
-  .action(validateSynqKey);
-program.command('nightly').description('Start synchronizer with latest nightly test Docker image').action(startNightly);
-program.command('test-nightly').description('Test nightly launch with direct Docker command').action(testNightly);
-program.command('check-updates').description('Check for Docker image updates manually').action(checkImageUpdates);
-program.command('monitor').description('Start background monitoring for Docker image updates').action(startImageMonitoring);
+  .action(async (key) => {
+    await performAutomaticUpdateCheck();
+    return await validateSynqKey(key);
+  });
+program.command('nightly').description('Start synchronizer with latest nightly test Docker image').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await startNightly();
+});
+program.command('test-nightly').description('Test nightly launch with direct Docker command').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await testNightly();
+});
+program.command('update-container').description('Check for Docker image updates manually').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await checkImageUpdates();
+});
+program.command('monitor').description('Start background monitoring for Docker image updates').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await startImageMonitoring();
+});
 program.command('monitor-service').description('Generate systemd service file for image monitoring').action(async () => {
+  await performAutomaticUpdateCheck();
   try {
     const result = await installImageMonitoringService();
     console.log(chalk.green('✅ Image monitoring service file generated successfully!'));
@@ -4013,8 +4311,17 @@ program.command('monitor-service').description('Generate systemd service file fo
     process.exit(1);
   }
 });
-program.command('api').description('Set up synchronizer via Enterprise API').action(setupViaEnterpriseAPI);
+program.command('update-cli').description('Check for CLI updates and install automatically').action(updateCLI);
+program.command('update').description('Check for all updates (CLI and Docker containers)').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await checkAllUpdates();
+});
+program.command('api').description('Set up synchronizer via Enterprise API').action(async () => {
+  await performAutomaticUpdateCheck();
+  return await setupViaEnterpriseAPI();
+});
 program.command('api-auto').description('Automatic Enterprise API setup using API preferences').action(async () => {
+  await performAutomaticUpdateCheck();
   try {
     const apiKey = await inquirer.prompt([{
       type: 'password',
@@ -4161,4 +4468,135 @@ async function deployAll(options) {
     console.error(chalk.red('❌ Deployment failed:'), error.message);
     process.exit(1);
   }
+}
+
+/**
+ * Check for both CLI and Docker container updates in a unified command
+ */
+async function checkAllUpdates() {
+  console.log(chalk.blue('🔄 Checking All Updates'));
+  console.log(chalk.yellow('Checking both CLI and Docker container updates...\n'));
+
+  let hasAnyUpdates = false;
+
+  // 1. Check CLI updates first
+  console.log(chalk.cyan('📦 Checking CLI Updates...'));
+  console.log(chalk.gray('─'.repeat(50)));
+  
+  const cliUpdateInfo = await checkForCLIUpdate();
+  
+  if (cliUpdateInfo.error) {
+    console.log(chalk.red(`❌ Error checking CLI updates: ${cliUpdateInfo.error}`));
+  } else {
+    console.log(chalk.blue(`Current CLI version: ${cliUpdateInfo.currentVersion}`));
+    console.log(chalk.blue(`Latest CLI version:  ${cliUpdateInfo.latestVersion}`));
+    
+    if (cliUpdateInfo.hasUpdate) {
+      hasAnyUpdates = true;
+      console.log(chalk.yellow(`🔄 CLI update available: ${cliUpdateInfo.currentVersion} → ${cliUpdateInfo.latestVersion}`));
+      
+      const shouldUpdateCLI = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'update',
+        message: 'Update CLI now?',
+        default: true
+      }]);
+      
+      if (shouldUpdateCLI.update) {
+        // Determine package manager
+        let packageManager = 'npm';
+        let installCommand = 'npm install -g synchronizer-cli@latest';
+        
+        try {
+          execSync('pnpm --version', { stdio: 'ignore' });
+          packageManager = 'pnpm';
+          installCommand = 'pnpm add -g synchronizer-cli@latest';
+        } catch (error) {
+          // Use npm
+        }
+        
+        try {
+          console.log(chalk.cyan(`⬇️ Updating CLI with ${packageManager}...`));
+          execSync(installCommand, { stdio: 'inherit' });
+          console.log(chalk.green('✅ CLI updated successfully!'));
+        } catch (error) {
+          console.log(chalk.red(`❌ CLI update failed: ${error.message}`));
+        }
+      }
+    } else {
+      console.log(chalk.green('✅ CLI is up to date'));
+    }
+  }
+
+  console.log(''); // Spacing
+
+  // 2. Check Docker container updates
+  console.log(chalk.cyan('🐳 Checking Docker Container Updates...'));
+  console.log(chalk.gray('─'.repeat(50)));
+
+  const images = [
+    { name: 'cdrakep/synqchronizer:latest', description: 'Main synchronizer image' },
+    { name: 'cdrakep/synqchronizer-test-fixed:latest', description: 'Fixed nightly test image' }
+  ];
+
+  let containerUpdatesAvailable = 0;
+
+  for (const image of images) {
+    console.log(chalk.gray(`Checking ${image.description}...`));
+    
+    try {
+      const hasUpdate = await isNewDockerImageAvailable(image.name);
+      
+      if (hasUpdate) {
+        hasAnyUpdates = true;
+        containerUpdatesAvailable++;
+        console.log(chalk.yellow(`🔄 Update available: ${image.name}`));
+        
+        const shouldPull = await inquirer.prompt([{
+          type: 'confirm',
+          name: 'pull',
+          message: `Pull latest version of ${image.name}?`,
+          default: true
+        }]);
+        
+        if (shouldPull.pull) {
+          try {
+            console.log(chalk.cyan(`⬇️ Pulling ${image.name}...`));
+            execSync(`docker pull ${image.name}`, { stdio: 'inherit' });
+            console.log(chalk.green(`✅ Successfully updated ${image.name}`));
+          } catch (error) {
+            console.log(chalk.red(`❌ Failed to pull ${image.name}: ${error.message}`));
+          }
+        }
+      } else {
+        console.log(chalk.green(`✅ ${image.name} is up to date`));
+      }
+    } catch (error) {
+      console.log(chalk.red(`❌ Error checking ${image.name}: ${error.message}`));
+    }
+  }
+
+  // 3. Summary
+  console.log(''); // Spacing
+  console.log(chalk.blue('📊 Update Summary:'));
+  console.log(chalk.gray('─'.repeat(30)));
+  
+  if (!hasAnyUpdates) {
+    console.log(chalk.green('✅ Everything is up to date!'));
+    console.log(chalk.gray('   • CLI: Latest version'));
+    console.log(chalk.gray('   • Containers: All images current'));
+  } else {
+    console.log(chalk.yellow('🔄 Updates were available'));
+    if (cliUpdateInfo.hasUpdate) {
+      console.log(chalk.gray('   • CLI: Update available'));
+    }
+    if (containerUpdatesAvailable > 0) {
+      console.log(chalk.gray(`   • Containers: ${containerUpdatesAvailable} image(s) had updates`));
+    }
+  }
+  
+  console.log('');
+  console.log(chalk.gray('💡 Individual update commands:'));
+  console.log(chalk.gray('   synchronize update-cli        # CLI updates only'));
+  console.log(chalk.gray('   synchronize update-container  # Container updates only'));
 }
