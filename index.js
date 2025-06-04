@@ -1151,34 +1151,64 @@ async function startWebGUI(options = {}) {
   // Use custom ports if provided, otherwise find available ports
   let guiPort, metricsPort;
   
-  if (options.port) {
+  if (options.port && options.metricsPort) {
+    // Both ports provided - validate they don't conflict
+    guiPort = options.port;
+    metricsPort = options.metricsPort;
+    console.log(chalk.cyan(`📌 Using custom dashboard port: ${guiPort}`));
+    console.log(chalk.cyan(`📌 Using custom metrics port: ${metricsPort}`));
+    
+    if (guiPort === metricsPort) {
+      console.error(chalk.red('❌ Error: Dashboard and metrics ports cannot be the same'));
+      console.log(chalk.gray('   Use different values for --port and --metrics-port'));
+      process.exit(1);
+    }
+  } else if (options.port) {
+    // Only dashboard port provided
     guiPort = options.port;
     console.log(chalk.cyan(`📌 Using custom dashboard port: ${guiPort}`));
-  } else {
+    console.log(chalk.gray('🔍 Finding available port for metrics...'));
+    metricsPort = await findAvailablePort(guiPort + 1);
+    console.log(chalk.green(`✅ Found metrics port: ${metricsPort}`));
+  } else if (options.metricsPort) {
+    // Only metrics port provided
+    metricsPort = options.metricsPort;
+    console.log(chalk.cyan(`📌 Using custom metrics port: ${metricsPort}`));
     console.log(chalk.gray('🔍 Finding available port for dashboard...'));
+    guiPort = await findAvailablePort(3000);
+    if (guiPort === metricsPort) {
+      // If we found the same port, find a different one
+      guiPort = await findAvailablePort(metricsPort === 3000 ? 3001 : 3000);
+    }
+    if (guiPort !== 3000) {
+      console.log(chalk.yellow(`⚠️  Port 3000 was busy, using port ${guiPort} for dashboard`));
+    }
+  } else {
+    // No custom ports - find both automatically
+    console.log(chalk.gray('🔍 Finding available ports for dashboard and metrics...'));
+    
+    // Find dashboard port first
     guiPort = await findAvailablePort(3000);
     if (guiPort !== 3000) {
       console.log(chalk.yellow(`⚠️  Port 3000 was busy, using port ${guiPort} for dashboard`));
     }
-  }
-  
-  if (options.metricsPort) {
-    metricsPort = options.metricsPort;
-    console.log(chalk.cyan(`📌 Using custom metrics port: ${metricsPort}`));
-  } else {
-    console.log(chalk.gray('🔍 Finding available port for metrics...'));
-    metricsPort = await findAvailablePort(options.port ? options.port + 1 : guiPort + 1);
-    if (metricsPort !== 3001) {
-      console.log(chalk.yellow(`⚠️  Port 3001 was busy, using port ${metricsPort} for metrics`));
+    
+    // Find metrics port, starting from guiPort + 1
+    metricsPort = await findAvailablePort(guiPort + 1);
+    const expectedMetricsPort = guiPort === 3000 ? 3001 : guiPort + 1;
+    if (metricsPort !== expectedMetricsPort) {
+      console.log(chalk.yellow(`⚠️  Port ${expectedMetricsPort} was busy, using port ${metricsPort} for metrics`));
     }
   }
   
-  // Validate ports don't conflict
+  // Final validation
   if (guiPort === metricsPort) {
     console.error(chalk.red('❌ Error: Dashboard and metrics ports cannot be the same'));
-    console.log(chalk.gray('   Use different values for --port and --metrics-port'));
+    console.log(chalk.gray('   This should not happen - please report this as a bug'));
     process.exit(1);
   }
+  
+  console.log(chalk.blue(`🎯 Dashboard will use port ${guiPort}, metrics will use port ${metricsPort}`));
   
   // Create Express apps
   const guiApp = express();
@@ -1302,42 +1332,79 @@ async function startWebGUI(options = {}) {
     res.json(health);
   });
   
-  // Start servers
-  const guiServer = guiApp.listen(guiPort, '0.0.0.0', () => {
-    console.log(chalk.green(`🎨 Web Dashboard: http://${primaryIP}:${guiPort}`));
-    if (config.dashboardPassword) {
-      console.log(chalk.gray('   Use any username with your configured password to access'));
-    }
-  });
-  
-  const metricsServer = metricsApp.listen(metricsPort, '0.0.0.0', () => {
-    console.log(chalk.green(`📊 Metrics API: http://${primaryIP}:${metricsPort}/metrics`));
-    console.log(chalk.green(`❤️  Health Check: http://${primaryIP}:${metricsPort}/health`));
+  // Start servers sequentially to avoid race conditions
+  return new Promise((resolve, reject) => {
+    // Start dashboard server first
+    const guiServer = guiApp.listen(guiPort, '0.0.0.0', () => {
+      console.log(chalk.green(`🎨 Web Dashboard: http://${primaryIP}:${guiPort}`));
+      if (config.dashboardPassword) {
+        console.log(chalk.gray('   Use any username with your configured password to access'));
+      }
+      
+      // Only start metrics server after dashboard is successfully listening
+      const metricsServer = metricsApp.listen(metricsPort, '0.0.0.0', () => {
+        console.log(chalk.green(`📊 Metrics API: http://${primaryIP}:${metricsPort}/metrics`));
+        console.log(chalk.green(`❤️  Health Check: http://${primaryIP}:${metricsPort}/health`));
+        
+        // Show local URLs in a separate section if not localhost
+        if (primaryIP !== 'localhost') {
+          console.log(chalk.blue('\n📍 Local Access:'));
+          console.log(chalk.gray(`   Dashboard: http://localhost:${guiPort}`));
+          console.log(chalk.gray(`   Metrics: http://localhost:${metricsPort}/metrics`));
+          console.log(chalk.gray(`   Health: http://localhost:${metricsPort}/health`));
+        }
+        
+        console.log(chalk.blue('\n🔄 Auto-refresh dashboard every 5 seconds'));
+        console.log(chalk.gray('Press Ctrl+C to stop the web servers\n'));
+        
+        // Set up graceful shutdown for both servers
+        const shutdown = () => {
+          console.log(chalk.yellow('\n🛑 Shutting down web servers...'));
+          clearUsedPorts(); // Clear used ports so they can be reused
+          guiServer.close();
+          metricsServer.close();
+          process.exit(0);
+        };
+        
+        process.on('SIGINT', shutdown);
+        process.on('SIGTERM', shutdown);
+        
+        // Keep the process alive
+        setInterval(() => {
+          // Just keep alive, servers handle requests
+        }, 5000);
+        
+        resolve({ guiServer, metricsServer });
+      });
+      
+      metricsServer.on('error', (err) => {
+        console.error(chalk.red('❌ Failed to start metrics server:'), err.message);
+        if (err.code === 'EADDRINUSE') {
+          console.error(chalk.yellow(`   Port ${metricsPort} is already in use. Try stopping other services or use custom ports:`));
+          console.error(chalk.gray(`   synchronize web --port ${guiPort} --metrics-port ${metricsPort + 1}`));
+        }
+        guiServer.close();
+        reject(err);
+      });
+    });
     
-    // Show local URLs in a separate section if not localhost
-    if (primaryIP !== 'localhost') {
-      console.log(chalk.blue('\n📍 Local Access:'));
-      console.log(chalk.gray(`   Dashboard: http://localhost:${guiPort}`));
-      console.log(chalk.gray(`   Metrics: http://localhost:${metricsPort}/metrics`));
-      console.log(chalk.gray(`   Health: http://localhost:${metricsPort}/health`));
-    }
+    guiServer.on('error', (err) => {
+      console.error(chalk.red('❌ Failed to start dashboard server:'), err.message);
+      if (err.code === 'EADDRINUSE') {
+        console.error(chalk.yellow(`   Port ${guiPort} is already in use. Try stopping other services or use custom ports:`));
+        console.error(chalk.gray(`   synchronize web --port ${guiPort + 1} --metrics-port ${metricsPort + 1}`));
+      }
+      reject(err);
+    });
   });
-  
-  console.log(chalk.blue('\n🔄 Auto-refresh dashboard every 5 seconds'));
-  console.log(chalk.gray('Press Ctrl+C to stop the web servers\n'));
-  
-  // Graceful shutdown
-  process.on('SIGINT', () => {
-    console.log(chalk.yellow('\n🛑 Shutting down web servers...'));
-    guiServer.close();
-    metricsServer.close();
-    process.exit(0);
-  });
-  
-  // Keep the process alive
-  setInterval(() => {
-    // Just keep alive, servers handle requests
-  }, 1000);
+}
+
+// Track ports being used to prevent race conditions
+const usedPorts = new Set();
+
+// Clear used ports when servers shut down
+function clearUsedPorts() {
+  usedPorts.clear();
 }
 
 async function findAvailablePort(startPort) {
@@ -1355,15 +1422,12 @@ async function findAvailablePort(startPort) {
       }
       
       attempts++;
-      const server = net.createServer();
       
-      server.listen(port, () => {
-        const actualPort = server.address().port;
-        server.close(() => resolve(actualPort));
-      });
+      // Create a new server for testing
+      const testServer = net.createServer();
       
-      server.on('error', (err) => {
-        if (err.code === 'EADDRINUSE') {
+      testServer.on('error', (err) => {
+        if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
           // Port is busy, try the next one
           tryPort(port + 1);
         } else {
@@ -1371,6 +1435,16 @@ async function findAvailablePort(startPort) {
           tryPort(port + 1);
         }
       });
+      
+      testServer.on('listening', () => {
+        const actualPort = testServer.address().port;
+        testServer.close(() => {
+          resolve(actualPort);
+        });
+      });
+      
+      // Test the port
+      testServer.listen(port, '0.0.0.0');
     }
     
     tryPort(startPort);
@@ -3985,8 +4059,15 @@ program.command('web')
   .option('-d, --dashboard-password <password>', 'Set dashboard password')
   .option('-w, --wallet <address>', 'Wallet address')
   .option('-s, --synchronizer-id <id>', 'Synchronizer ID (for existing configs)')
-  .option('-n, --synchronizer-name <name>', 'Synchronizer name (for display/reference)')
-  .action(startWebGUI);
+  .option('-n, --synchronizer-name <n>', 'Synchronizer name (for display/reference)')
+  .action(async (options) => {
+    try {
+      await startWebGUI(options);
+    } catch (error) {
+      console.error(chalk.red('❌ Failed to start web dashboard:'), error.message);
+      process.exit(1);
+    }
+  });
 program.command('install-docker').description('Install Docker automatically (Linux only)').action(installDocker);
 program.command('fix-docker').description('Fix Docker permissions (add user to docker group)').action(fixDockerPermissions);
 program.command('test-platform').description('Test Docker platform compatibility').action(testPlatform);
