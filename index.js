@@ -22,11 +22,26 @@ const CACHE_FILE = path.join(CONFIG_DIR, 'wallet-points-cache.json');
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds for successful responses
 const ERROR_CACHE_DURATION = 30 * 1000; // 30 seconds for error responses
 
+const REGISTRY_APIS = {
+  local: 'http://localhost:8787',
+  dev: 'https://api.multisynq.dev/depin',
+  prod: 'https://api.multisynq.io/depin'
+};
+const REGISTRY_API = REGISTRY_APIS[process.env.MQ_DEPIN || 'prod'];
+
 function loadConfig() {
+  // for testing, allow command-line override of depin, key, wallet, account
+  // e.g. MQ_DEPIN=dev MQ_KEY=<some key> synchronize start
+  let config = {};
   if (fs.existsSync(CONFIG_FILE)) {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
   }
-  return {};
+
+  if (process.env.MQ_DEPIN) config.depin = process.env.MQ_DEPIN;
+  if (process.env.MQ_KEY) config.key = process.env.MQ_KEY;
+  if (process.env.MQ_WALLET) config.wallet = process.env.MQ_WALLET;
+  if (process.env.MQ_ACCOUNT) config.account = process.env.MQ_ACCOUNT;
+  return config;
 }
 
 function saveConfig(config) {
@@ -66,29 +81,29 @@ function createEmptyPointsData() {
 
 function authenticateRequest(req, res, next) {
   const config = loadConfig();
-  
+
   // If no password is set, allow access
   if (!config.dashboardPassword) {
     return next();
   }
-  
+
   const auth = req.headers.authorization;
-  
+
   if (!auth || !auth.startsWith('Basic ')) {
     res.setHeader('WWW-Authenticate', 'Basic realm="Synchronizer Dashboard"');
     res.status(401).send('Authentication required');
     return;
   }
-  
+
   const credentials = Buffer.from(auth.slice(6), 'base64').toString();
   const [username, password] = credentials.split(':');
-  
+
   // Simple authentication - username can be anything, password must match
   if (password === config.dashboardPassword) {
     req.authenticated = true;
     return next();
   }
-  
+
   res.setHeader('WWW-Authenticate', 'Basic realm="Synchronizer Dashboard"');
   res.status(401).send('Invalid credentials');
 }
@@ -109,7 +124,7 @@ function detectNpxPath() {
   } catch (error) {
     // 'which' failed, try other methods
   }
-  
+
   try {
     // Try to find npm and assume npx is in the same directory
     const npmPath = execSync('which npm', { encoding: 'utf8', stdio: 'pipe' }).trim();
@@ -122,7 +137,7 @@ function detectNpxPath() {
   } catch (error) {
     // npm not found either
   }
-  
+
   // Common fallback locations
   const fallbackPaths = [
     '/usr/bin/npx',
@@ -131,13 +146,13 @@ function detectNpxPath() {
     path.join(os.homedir(), '.npm-global/bin/npx'),
     path.join(os.homedir(), '.nvm/current/bin/npx')
   ];
-  
+
   for (const fallbackPath of fallbackPaths) {
     if (fs.existsSync(fallbackPath)) {
       return fallbackPath;
     }
   }
-  
+
   // Last resort - assume it's in PATH
   return 'npx';
 }
@@ -148,31 +163,25 @@ function detectNpxPath() {
  * @returns {Promise<boolean>} True if new image is available or no local image exists
  */
 async function isNewDockerImageAvailable(imageName) {
+  // Check if we have the image locally
   try {
-    // Check if we have the image locally
-    try {
-      const localImageCmd = `docker images ${imageName} --format "{{.ID}}"`;
-      const localImageId = execSync(localImageCmd, { encoding: 'utf8', stdio: 'pipe' }).trim();
-      
-      // If there's no local image, we need to pull
-      if (!localImageId) {
-        return true;
-      }
-    } catch (error) {
-      // No local image found
+    const localImageCmd = `docker images ${imageName} --format "{{.ID}}"`;
+    const localImageId = execSync(localImageCmd, { encoding: 'utf8', stdio: 'pipe' }).trim();
+
+    // If there's no local image, we need to pull
+    if (!localImageId) {
       return true;
     }
-    
-    // For now, we'll use a simpler approach:
-    // Always pull with --pull always flag when starting containers
-    // This lets Docker handle the logic of whether to actually download
-    // Return false to avoid duplicate pulling attempts
-    return false;
-    
   } catch (error) {
-    // On any error, assume we should try to pull
+    // No local image found, or any other error
     return true;
   }
+
+  // For now, we'll use a simpler approach:
+  // Always pull with --pull always flag when starting containers
+  // This lets Docker handle the logic of whether to actually download
+  // Return false to avoid duplicate pulling attempts
+  return false;
 }
 
 /**
@@ -192,29 +201,28 @@ function validateSynqKeyFormat(key) {
  * @returns {Promise<{isValid: boolean, message: string}>} Result object with validation status and message
  */
 async function validateSynqKeyWithAPI(key, nickname = '') {
-  const DOMAIN = 'multisynq.io';
-  const SYNQ_KEY_URL = `https://api.${DOMAIN}/depin/synchronizers/key`;
-  
+  const SYNQ_KEY_URL = `${REGISTRY_API}/synchronizers/key`;
+
   // If no nickname is provided, use a default one to prevent the "missing synchronizer name" error
   const syncNickname = nickname || 'cli-validator';
-  
+
   const url = `${SYNQ_KEY_URL}/${key}/precheck?nickname=${encodeURIComponent(syncNickname)}`;
-  
+
   console.log(chalk.gray(`Validating synq key with remote API...`));
-  
+
   try {
     const response = await fetch(url);
     const keyStatus = await response.text();
-    
+
     if (keyStatus === 'ok') {
       return { isValid: true, message: 'Key is valid and available' };
     } else {
       return { isValid: false, message: keyStatus };
     }
   } catch (error) {
-    return { 
-      isValid: false, 
-      message: `Could not validate key with API: ${error.message}. Will proceed with local validation only.` 
+    return {
+      isValid: false,
+      message: `Could not validate key with API: ${error.message}. Will proceed with local validation only.`
     };
   }
 }
@@ -240,18 +248,18 @@ async function init() {
     message: 'Synq key:',
     validate: async (input) => {
       if (!input) return 'Synq key is required';
-      
+
       // First validate the format locally
       if (!validateSynqKeyFormat(input)) {
         return 'Invalid synq key format. Must be a valid UUID v4 format (XXXXXXXX-XXXX-4XXX-YXXX-XXXXXXXXXXXX where Y is 8, 9, A, or B)';
       }
-      
+
       // If local validation passes, try remote validation with the userName
       try {
         // Use the userName or a default nickname
         const nickname = userName || 'cli-setup';
         const validationResult = await validateSynqKeyWithAPI(input, nickname);
-        
+
         if (!validationResult.isValid) {
           // If API returns an error specific to the key, show it
           if (validationResult.message.includes('Key')) {
@@ -263,7 +271,7 @@ async function init() {
         } else {
           console.log(chalk.green('✅ Key validated successfully with API'));
         }
-        
+
         return true;
       } catch (error) {
         // If API validation fails for any reason, accept the key if it passed format validation
@@ -273,7 +281,7 @@ async function init() {
       }
     }
   };
-  
+
   // Add the key question and wallet question
   const remainingQuestions = [
     keyQuestion,
@@ -293,7 +301,7 @@ async function init() {
 
   // Get answers for the remaining questions
   const remainingAnswers = await inquirer.prompt(remainingQuestions);
-  
+
   // Combine all answers
   const answers = {
     ...userNameAnswer,
@@ -309,7 +317,7 @@ async function init() {
       validate: input => input && input.length >= 4 ? true : 'Password must be at least 4 characters',
       mask: '*'
     }];
-    
+
     const passwordAnswers = await inquirer.prompt(passwordQuestions);
     answers.dashboardPassword = passwordAnswers.dashboardPassword;
   }
@@ -323,7 +331,7 @@ async function init() {
     secret,
     hostname,
     syncHash,
-    depin: 'wss://api.multisynq.io/depin',
+    depin: 'prod',
     launcher: 'cli'
   };
 
@@ -332,7 +340,7 @@ async function init() {
 
   saveConfig(config);
   console.log(chalk.green('Configuration saved to'), CONFIG_FILE);
-  
+
   if (config.dashboardPassword) {
     console.log(chalk.yellow('🔒 Dashboard password protection enabled'));
     console.log(chalk.gray('Use any username with your password to access the web dashboard'));
@@ -352,14 +360,14 @@ function checkDocker() {
 
 async function installDocker() {
   const platform = os.platform();
-  
+
   console.log(chalk.blue('🐳 Docker Installation Helper'));
   console.log(chalk.yellow('This will help you install Docker on your system.\n'));
 
   if (platform === 'linux') {
     const distro = await detectLinuxDistro();
     console.log(chalk.cyan(`Detected Linux distribution: ${distro}`));
-    
+
     const confirm = await inquirer.prompt([{
       type: 'confirm',
       name: 'install',
@@ -394,27 +402,27 @@ async function detectLinuxDistro() {
 
 async function installDockerLinux(distro) {
   console.log(chalk.blue('Installing Docker...'));
-  
+
   try {
     if (distro === 'ubuntu' || distro === 'debian') {
       console.log(chalk.cyan('Updating package index...'));
       execSync('sudo apt-get update', { stdio: 'inherit' });
-      
+
       console.log(chalk.cyan('Installing prerequisites...'));
       execSync('sudo apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release', { stdio: 'inherit' });
-      
+
       console.log(chalk.cyan('Adding Docker GPG key...'));
       execSync('curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg', { stdio: 'inherit' });
-      
+
       console.log(chalk.cyan('Adding Docker repository...'));
       const arch = execSync('dpkg --print-architecture', { encoding: 'utf8' }).trim();
       const codename = execSync('lsb_release -cs', { encoding: 'utf8' }).trim();
       execSync(`echo "deb [arch=${arch} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu ${codename} stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null`, { stdio: 'inherit' });
-      
+
       console.log(chalk.cyan('Installing Docker...'));
       execSync('sudo apt-get update', { stdio: 'inherit' });
       execSync('sudo apt-get install -y docker-ce docker-ce-cli containerd.io', { stdio: 'inherit' });
-      
+
     } else if (distro === 'centos' || distro === 'rhel' || distro === 'fedora') {
       console.log(chalk.cyan('Installing Docker via yum/dnf...'));
       const installer = distro === 'fedora' ? 'dnf' : 'yum';
@@ -422,19 +430,19 @@ async function installDockerLinux(distro) {
       execSync(`sudo ${installer}-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo`, { stdio: 'inherit' });
       execSync(`sudo ${installer} install -y docker-ce docker-ce-cli containerd.io`, { stdio: 'inherit' });
     }
-    
+
     console.log(chalk.cyan('Starting Docker service...'));
     execSync('sudo systemctl start docker', { stdio: 'inherit' });
     execSync('sudo systemctl enable docker', { stdio: 'inherit' });
-    
+
     console.log(chalk.cyan('Adding user to docker group...'));
     const username = os.userInfo().username;
     execSync(`sudo usermod -aG docker ${username}`, { stdio: 'inherit' });
-    
+
     console.log(chalk.green('✅ Docker installed successfully!'));
     console.log(chalk.yellow('⚠️  You may need to log out and log back in for group changes to take effect.'));
     console.log(chalk.blue('You can test Docker with: docker run hello-world'));
-    
+
   } catch (error) {
     console.error(chalk.red('❌ Failed to install Docker automatically.'));
     console.error(chalk.red('Error:', error.message));
@@ -444,7 +452,7 @@ async function installDockerLinux(distro) {
 
 function showManualInstructions(platform) {
   console.log(chalk.blue('\n📖 Manual Installation Instructions:'));
-  
+
   if (platform === 'linux') {
     console.log(chalk.white('For Ubuntu/Debian:'));
     console.log(chalk.gray('  curl -fsSL https://get.docker.com -o get-docker.sh'));
@@ -460,7 +468,7 @@ function showManualInstructions(platform) {
     console.log(chalk.white('For Windows:'));
     console.log(chalk.gray('  Download Docker Desktop from: https://docs.docker.com/desktop/windows/install/'));
   }
-  
+
   console.log(chalk.blue('\nFor more details: https://docs.docker.com/get-docker/'));
 }
 
@@ -479,7 +487,7 @@ async function start() {
   // Check if Docker is installed
   if (!checkDocker()) {
     console.error(chalk.red('Docker is not installed or not accessible.'));
-    
+
     const shouldInstall = await inquirer.prompt([{
       type: 'confirm',
       name: 'install',
@@ -489,7 +497,7 @@ async function start() {
 
     if (shouldInstall.install) {
       await installDocker();
-      
+
       // Check again after installation
       if (!checkDocker()) {
         console.error(chalk.red('Docker installation may have failed or requires a restart.'));
@@ -501,24 +509,34 @@ async function start() {
       process.exit(1);
     }
   }
-  
+
   const syncName = config.syncHash;
   const containerName = 'synchronizer-cli';
 
   // Check if container is already running
+  // %%% NB: if user runs "synchronize start" in two terminals, they'll both connect
+  // to the same running image.  could be useful under some circs.
+  // but if the user hits control-C in either terminal, of course both will shut down.
   try {
-    const runningContainers = execSync(`docker ps --filter name=${containerName} --format "{{.Names}}"`, {
+    const runningContainers = execSync(`docker ps --filter name=${containerName} --format "{{.Names}} {{.Ports}}"`, {
       encoding: 'utf8',
       stdio: 'pipe'
     });
-    
+
     if (runningContainers.includes(containerName)) {
       console.log(chalk.green(`✅ Found existing synchronizer container running`));
       console.log(chalk.cyan(`🔗 Connecting to logs... (Ctrl+C will stop the container)`));
-      
+
       // Connect to the existing container's logs
       const logProc = spawn('docker', ['logs', '-f', containerName], { stdio: 'inherit' });
-      
+
+      // Reconnect to the container's control socket, if we know where
+      const portMatch = runningContainers.match(/:(\d+)->3333\/tcp/);
+      if (portMatch) {
+        const existingSyncPort = parseInt(portMatch[1]);
+        connectToSync(existingSyncPort, true); // true => start stats poll immediately
+      }
+
       // Handle Ctrl+C to stop the container
       const cleanup = () => {
         console.log(chalk.yellow('\n🛑 Stopping synchronizer container...'));
@@ -530,14 +548,14 @@ async function start() {
         }
         process.exit(0);
       };
-      
+
       process.on('SIGINT', cleanup);
       process.on('SIGTERM', cleanup);
-      
+
       logProc.on('exit', (code) => {
         process.exit(code);
       });
-      
+
       return;
     }
   } catch (error) {
@@ -548,7 +566,7 @@ async function start() {
   const arch = os.arch();
   const platform = os.platform();
   let dockerPlatform = 'linux/amd64'; // Default to amd64
-  
+
   if (platform === 'linux') {
     if (arch === 'arm64' || arch === 'aarch64') {
       dockerPlatform = 'linux/arm64';
@@ -568,12 +586,14 @@ async function start() {
   // Check if we need to pull the latest Docker image
   const imageName = 'cdrakep/synqchronizer:latest';
   const shouldPull = await isNewDockerImageAvailable(imageName);
-  
+
   // Pull the latest image only if necessary
-  if (shouldPull) {
+  // %%% NB: for now, docker command below includes "--pull always", so presumably
+  // triggering an additional pull from here would be bad...?
+  if (false && shouldPull) {
     console.log(chalk.cyan('Pulling latest Docker image...'));
     try {
-      execSync(`docker pull ${imageName}`, { 
+      execSync(`docker pull ${imageName}`, {
         stdio: ['ignore', 'pipe', 'pipe']
       });
       console.log(chalk.green('✅ Docker image pulled successfully'));
@@ -583,50 +603,54 @@ async function start() {
     }
   }
 
+  const syncPort = await findAvailablePort(3300);
+  if (!syncPort) throw Error("Failed to find available port for CLI/synchronizer connection");
+
   // Create Docker command
   const dockerCmd = 'docker';
   const args = [
     'run', '--rm', '--name', containerName,
     '--pull', 'always', // Always try to pull the latest image
     '--platform', dockerPlatform,
+    '--publish', `${syncPort}:3333`,
     imageName
   ];
-  
+
   // Add container arguments correctly - each flag and value as separate items
   if (config.depin) {
     args.push('--depin');
     args.push(config.depin);
   } else {
     args.push('--depin');
-    args.push('wss://api.multisynq.io/depin');
+    args.push('prod');
   }
-  
+
   args.push('--sync-name');
   args.push(syncName);
-  
+
   args.push('--launcher');
   args.push(launcherWithVersion);
-  
+
   args.push('--key');
   args.push(config.key);
-  
+
   if (config.wallet) {
     args.push('--wallet');
     args.push(config.wallet);
   }
-  
+
   if (config.account) {
     args.push('--account');
     args.push(config.account);
   }
 
   console.log(chalk.cyan(`Running synchronizer "${syncName}" with wallet ${config.wallet || '[none]'}`));
-  
+
   // For debugging
   console.log(chalk.gray(`Running command: ${dockerCmd} ${args.join(' ')}`));
-  
+
   const proc = spawn(dockerCmd, args, { stdio: 'inherit' });
-  
+
   // Handle Ctrl+C to stop the container
   const cleanup = () => {
     console.log(chalk.yellow('\n🛑 Stopping synchronizer container...'));
@@ -638,10 +662,10 @@ async function start() {
     }
     process.exit(0);
   };
-  
+
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
-  
+
   proc.on('error', (err) => {
     if (err.code === 'ENOENT') {
       console.error(chalk.red('Docker command not found. Please ensure Docker is installed and in your PATH.'));
@@ -650,7 +674,7 @@ async function start() {
     }
     process.exit(1);
   });
-  
+
   proc.on('exit', code => {
     if (code === 126) {
       console.error(chalk.red('❌ Docker permission denied.'));
@@ -679,8 +703,94 @@ async function start() {
     }
     process.exit(code);
   });
+
+  connectToSync(syncPort);
 }
 
+async function connectToSync(port, startStatsImmediately = false) {
+  const syncSocket = await connectToSyncSocket(port, msgObj => {
+    console.log(`Message from sync:`, msgObj);
+
+    if (msgObj.what === 'syncDetails') {
+      // sync is up and running and registered; start polling for stats if not already done
+      if (!startStatsImmediately) startStatsPoll();
+    }
+
+    /* %%%%%%%%%%%%% add handling for other messages.
+      message.what can be...
+
+        'synqKeyRejected'
+        'syncDetails' (handled above)
+        'demoToken' (if we want to support demos; would need a small update to the registry)
+        'developerToken' (if we want to support developer mode)
+        'stats'
+
+    for a start, a stats message will be something like
+    {
+      what: 'stats',
+      value: {
+        now: 1749100054213,
+        sessions: 0,
+        demoSessions: 0,
+        users: 0,
+        bytesOut: 0,
+        bytesIn: 0,
+        proxyConnectionState: 'CONNECTED',
+        syncLifeTraffic: 5772280,
+        syncLifePoints: 579,
+        walletLifePoints: 2103795,
+        walletBalance: null,
+        ratingsTimepoint: 0,
+        availability: 1,
+        reliability: 1,
+        efficiency: 1
+      }
+    }
+    */
+  });
+
+  const sendToSync = msgObj => {
+    if (syncSocket?.readyState === WebSocket.OPEN) syncSocket.send(JSON.stringify(msgObj));
+  };
+
+  const startStatsPoll = () => {
+    setInterval(() => sendToSync({ what: 'stats' }), 2000);
+  };
+
+  if (!syncSocket) console.error("Failed to connect to synchronizer socket");
+  else if (startStatsImmediately) startStatsPoll();
+}
+
+async function connectToSyncSocket(port, messageHandler) {
+  const start = Date.now();
+  const delay = 100; // ms between retries
+  let tries = 10;
+  const tryOnce = () => {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://localhost:${port}`);
+      ws.addEventListener('open', () => {
+        console.log(`Connected to synchronizer after ${Date.now() - start}ms`);
+        // ws.send(JSON.stringify({ command: 'poll_stats' }));
+        resolve(ws);
+      });
+      ws.addEventListener('message', event => messageHandler(JSON.parse(event.data.toString())));
+      ws.addEventListener('error', reject);
+      ws.addEventListener('close', () => console.log('Disconnected from synchronizer'));
+    });
+  };
+  while (tries > 0) {
+    try { return await tryOnce() }
+    catch (error) {
+      tries--;
+      if (tries > 0) {
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        console.error("Failed to connect to synchronizer socket");
+        return null;
+      }
+    }
+  }
+}
 
 /**
  * Generate systemd service file and environment file for headless operation.
@@ -703,7 +813,7 @@ async function installService() {
   const arch = os.arch();
   const platform = os.platform();
   let dockerPlatform = 'linux/amd64'; // Default to amd64
-  
+
   if (platform === 'linux') {
     if (arch === 'arm64' || arch === 'aarch64') {
       dockerPlatform = 'linux/arm64';
@@ -724,19 +834,19 @@ async function installService() {
   } catch (error) {
     // Use default path
   }
-  
+
   const dockerDir = path.dirname(dockerPath);
-  
+
   // Build PATH environment variable including docker directory
   const systemPaths = [
     '/usr/local/sbin',
-    '/usr/local/bin', 
+    '/usr/local/bin',
     '/usr/sbin',
     '/usr/bin',
     '/sbin',
     '/bin'
   ];
-  
+
   // Add docker directory to the beginning of PATH if it's not already a system path
   const pathDirs = systemPaths.includes(dockerDir) ? systemPaths : [dockerDir, ...systemPaths];
   const pathEnv = pathDirs.join(':');
@@ -746,14 +856,14 @@ async function installService() {
   console.log(chalk.cyan(`Using launcher identifier: ${launcherWithVersion}`));
 
   // No need to check for image updates here - the service will use --pull always
-  
+
   // Build the exact same command as the start function
   const dockerArgs = [
     'run', '--rm', '--name', 'synchronizer-cli',
     '--pull', 'always', // Always try to pull the latest image
     '--platform', dockerPlatform,
     'cdrakep/synqchronizer:latest',
-    '--depin', config.depin || 'wss://api.multisynq.io/depin',
+    '--depin', config.depin || 'prod',
     '--sync-name', config.syncHash,
     '--launcher', launcherWithVersion,
     '--key', config.key,
@@ -785,12 +895,12 @@ WantedBy=multi-user.target
   sudo systemctl daemon-reload
   sudo systemctl enable synchronizer-cli
   sudo systemctl start synchronizer-cli`));
-  
+
   console.log(chalk.cyan('\n📋 Service will run with the following configuration:'));
   console.log(chalk.gray(`Platform: ${dockerPlatform}`));
   console.log(chalk.gray(`Docker Path: ${dockerPath}`));
   console.log(chalk.gray(`PATH: ${pathEnv}`));
-  console.log(chalk.gray(`DePIN: ${config.depin || 'wss://api.multisynq.io/depin'}`));
+  console.log(chalk.gray(`DePIN: ${config.depin || 'prod'}`));
   console.log(chalk.gray(`Sync Name: ${config.syncHash}`));
   console.log(chalk.gray(`Wallet: ${config.wallet || '[none]'}`));
   console.log(chalk.gray(`Account: ${config.account || '[none]'}`));
@@ -801,17 +911,17 @@ async function fixDockerPermissions() {
   console.log(chalk.yellow('This will add your user to the docker group.\n'));
 
   const username = os.userInfo().username;
-  
+
   try {
     console.log(chalk.cyan(`Adding user "${username}" to docker group...`));
     execSync(`sudo usermod -aG docker ${username}`, { stdio: 'inherit' });
-    
+
     console.log(chalk.green('✅ User added to docker group successfully!'));
     console.log(chalk.yellow('⚠️  You need to log out and log back in for changes to take effect.'));
     console.log(chalk.blue('\n🧪 To test after logging back in:'));
     console.log(chalk.gray('   docker run hello-world'));
     console.log(chalk.gray('   synchronize start'));
-    
+
   } catch (error) {
     console.error(chalk.red('❌ Failed to add user to docker group.'));
     console.error(chalk.red('Error:', error.message));
@@ -827,29 +937,29 @@ async function testPlatform() {
 
   const arch = os.arch();
   const platform = os.platform();
-  
+
   console.log(chalk.cyan(`Host System: ${platform}/${arch}`));
-  
+
   // Test Docker availability
   if (!checkDocker()) {
     console.error(chalk.red('❌ Docker is not available'));
     return;
   }
-  
+
   console.log(chalk.green('✅ Docker is available'));
-  
+
   // Test both platforms and fallback
   const tests = [
     { name: 'linux/amd64', args: ['--platform', 'linux/amd64'] },
     { name: 'linux/arm64', args: ['--platform', 'linux/arm64'] },
     { name: 'no platform flag', args: [] }
   ];
-  
+
   let workingPlatforms = [];
-  
+
   for (const test of tests) {
     console.log(chalk.blue(`\nTesting ${test.name}...`));
-    
+
     try {
       const args = [
         'run', '--rm',
@@ -857,13 +967,13 @@ async function testPlatform() {
         'cdrakep/synqchronizer:latest',
         '--help'
       ];
-      
-      const result = execSync(`docker ${args.join(' ')}`, { 
-        encoding: 'utf8', 
+
+      const result = execSync(`docker ${args.join(' ')}`, {
+        encoding: 'utf8',
         timeout: 30000,
         stdio: 'pipe'
       });
-      
+
       if (result.includes('Usage:') || result.includes('--help')) {
         console.log(chalk.green(`✅ ${test.name} works`));
         workingPlatforms.push(test.name);
@@ -875,15 +985,15 @@ async function testPlatform() {
       console.log(chalk.red(`❌ ${test.name} failed: ${errorMsg}`));
     }
   }
-  
+
   // Recommend best platform
   let recommendedPlatform = 'linux/amd64';
   if (arch === 'arm64' || arch === 'aarch64') {
     recommendedPlatform = 'linux/arm64';
   }
-  
+
   console.log(chalk.blue(`\n💡 Recommended platform for your system: ${recommendedPlatform}`));
-  
+
   if (workingPlatforms.length === 0) {
     console.log(chalk.red('\n❌ No platforms are working!'));
     console.log(chalk.yellow('This suggests the Docker image may not support your architecture.'));
@@ -908,7 +1018,7 @@ async function showStatus() {
   try {
     // Check if service file exists
     const serviceExists = fs.existsSync('/etc/systemd/system/synchronizer-cli.service');
-    
+
     if (!serviceExists) {
       console.log(chalk.yellow('⚠️  Systemd service not installed'));
       console.log(chalk.gray('Run `synchronize service` to generate the service file'));
@@ -919,16 +1029,16 @@ async function showStatus() {
 
     // Get service status
     try {
-      const statusOutput = execSync('systemctl status synchronizer-cli --no-pager', { 
+      const statusOutput = execSync('systemctl status synchronizer-cli --no-pager', {
         encoding: 'utf8',
         stdio: 'pipe'
       });
-      
+
       // Parse status for key information
       const lines = statusOutput.split('\n');
       const statusLine = lines.find(line => line.includes('Active:'));
       const loadedLine = lines.find(line => line.includes('Loaded:'));
-      
+
       if (statusLine) {
         if (statusLine.includes('active (running)')) {
           console.log(chalk.green('🟢 Status: Running'));
@@ -955,13 +1065,13 @@ async function showStatus() {
     // Show recent logs
     console.log(chalk.blue('\n📋 Recent Logs (last 10 lines):'));
     console.log(chalk.gray('─'.repeat(60)));
-    
+
     try {
-      const logsOutput = execSync('journalctl -u synchronizer-cli --no-pager -n 10', { 
+      const logsOutput = execSync('journalctl -u synchronizer-cli --no-pager -n 10', {
         encoding: 'utf8',
         stdio: 'pipe'
       });
-      
+
       if (logsOutput.trim()) {
         // Color-code log levels
         const coloredLogs = logsOutput
@@ -982,7 +1092,7 @@ async function showStatus() {
             }
           })
           .join('\n');
-        
+
         console.log(coloredLogs);
       } else {
         console.log(chalk.gray('No recent logs found'));
@@ -1007,7 +1117,7 @@ async function showStatus() {
         encoding: 'utf8',
         stdio: 'pipe'
       });
-      
+
       if (dockerPs.includes('synchronizer-cli')) {
         console.log(chalk.yellow('\n⚠️  Manual synchronizer process also detected!'));
         console.log(chalk.gray('You may have both service and manual process running'));
@@ -1029,7 +1139,7 @@ async function showStatus() {
  */
 function getPrimaryLocalIP() {
   const interfaces = os.networkInterfaces();
-  
+
   // Priority order for interface types (prefer physical over virtual)
   const interfacePriority = {
     // Physical interfaces (highest priority)
@@ -1039,7 +1149,7 @@ function getPrimaryLocalIP() {
     'Wi-Fi': 70,    // WiFi (Windows)
     'wlan': 60,     // WiFi (Linux)
     'wlp': 55,      // WiFi (Linux - newer naming)
-    
+
     // Virtual interfaces (lower priority)
     'docker': 10,   // Docker interfaces
     'veth': 10,     // Virtual Ethernet
@@ -1060,21 +1170,21 @@ function getPrimaryLocalIP() {
     'Loopback': 5,  // Loopback (Windows)
     'lo': 5         // Loopback (Linux/macOS)
   };
-  
+
   const candidates = [];
-  
+
   for (const [interfaceName, addresses] of Object.entries(interfaces)) {
     // Skip loopback interfaces
     if (interfaceName === 'lo' || interfaceName.includes('Loopback')) {
       continue;
     }
-    
+
     for (const addr of addresses) {
       // Only consider IPv4 addresses that are not internal (loopback)
       if (addr.family === 'IPv4' && !addr.internal) {
         // Calculate priority based on interface name
         let priority = 1; // Default low priority
-        
+
         for (const [pattern, score] of Object.entries(interfacePriority)) {
           if (interfaceName.toLowerCase().startsWith(pattern.toLowerCase()) ||
               interfaceName.toLowerCase().includes(pattern.toLowerCase())) {
@@ -1082,15 +1192,15 @@ function getPrimaryLocalIP() {
             break;
           }
         }
-        
+
         // Boost priority for common private network ranges
         const ip = addr.address;
-        if (ip.startsWith('192.168.') || 
-            ip.startsWith('10.') || 
+        if (ip.startsWith('192.168.') ||
+            ip.startsWith('10.') ||
             (ip.startsWith('172.') && parseInt(ip.split('.')[1]) >= 16 && parseInt(ip.split('.')[1]) <= 31)) {
           priority += 20; // Prefer private network IPs
         }
-        
+
         // Penalise virtual/container networks
         if (interfaceName.toLowerCase().includes('docker') ||
             interfaceName.toLowerCase().includes('veth') ||
@@ -1103,7 +1213,7 @@ function getPrimaryLocalIP() {
             ip.startsWith('169.254.')) { // Link-local
           priority -= 50;
         }
-        
+
         candidates.push({
           ip: ip,
           interface: interfaceName,
@@ -1113,22 +1223,22 @@ function getPrimaryLocalIP() {
       }
     }
   }
-  
+
   // Sort by priority (highest first) and return the best candidate
   candidates.sort((a, b) => b.priority - a.priority);
-  
+
   if (candidates.length > 0) {
     const best = candidates[0];
     console.log(chalk.gray(`🌐 Detected primary IP: ${best.ip} (${best.interface})`));
-    
+
     // Log other candidates for debugging if needed
     if (candidates.length > 1) {
       console.log(chalk.gray(`   Other interfaces: ${candidates.slice(1, 3).map(c => `${c.ip} (${c.interface})`).join(', ')}`));
     }
-    
+
     return best.ip;
   }
-  
+
   console.log(chalk.yellow('⚠️  Could not detect primary IP, using localhost'));
   return 'localhost';
 }
@@ -1138,26 +1248,26 @@ async function startWebGUI(options = {}) {
   console.log(chalk.yellow('Setting up web dashboard and metrics endpoints...\n'));
 
   const config = loadConfig();
-  
+
   if (config.dashboardPassword) {
     console.log(chalk.green('🔒 Dashboard password protection enabled'));
   } else {
     console.log(chalk.yellow('⚠️  Dashboard is unprotected - consider setting a password'));
   }
-  
+
   // Get the primary local IP address
   const primaryIP = getPrimaryLocalIP();
-  
+
   // Use custom ports if provided, otherwise find available ports
   let guiPort, metricsPort;
-  
+
   if (options.port && options.metricsPort) {
     // Both ports provided - validate they don't conflict
     guiPort = options.port;
     metricsPort = options.metricsPort;
     console.log(chalk.cyan(`📌 Using custom dashboard port: ${guiPort}`));
     console.log(chalk.cyan(`📌 Using custom metrics port: ${metricsPort}`));
-    
+
     if (guiPort === metricsPort) {
       console.error(chalk.red('❌ Error: Dashboard and metrics ports cannot be the same'));
       console.log(chalk.gray('   Use different values for --port and --metrics-port'));
@@ -1186,13 +1296,13 @@ async function startWebGUI(options = {}) {
   } else {
     // No custom ports - find both automatically
     console.log(chalk.gray('🔍 Finding available ports for dashboard and metrics...'));
-    
+
     // Find dashboard port first
     guiPort = await findAvailablePort(3000);
     if (guiPort !== 3000) {
       console.log(chalk.yellow(`⚠️  Port 3000 was busy, using port ${guiPort} for dashboard`));
     }
-    
+
     // Find metrics port, starting from guiPort + 1
     metricsPort = await findAvailablePort(guiPort + 1);
     const expectedMetricsPort = guiPort === 3000 ? 3001 : guiPort + 1;
@@ -1200,49 +1310,49 @@ async function startWebGUI(options = {}) {
       console.log(chalk.yellow(`⚠️  Port ${expectedMetricsPort} was busy, using port ${metricsPort} for metrics`));
     }
   }
-  
+
   // Final validation
   if (guiPort === metricsPort) {
     console.error(chalk.red('❌ Error: Dashboard and metrics ports cannot be the same'));
     console.log(chalk.gray('   This should not happen - please report this as a bug'));
     process.exit(1);
   }
-  
+
   console.log(chalk.blue(`🎯 Dashboard will use port ${guiPort}, metrics will use port ${metricsPort}`));
-  
+
   // Create Express apps
   const guiApp = express();
   const metricsApp = express();
-  
+
   // Add authentication middleware to GUI app
   guiApp.use(authenticateRequest);
-  
+
   // GUI Dashboard
   guiApp.get('/', (req, res) => {
     const html = generateDashboardHTML(config, metricsPort, req.authenticated, primaryIP);
     res.send(html);
   });
-  
+
   guiApp.get('/api/status', async (req, res) => {
     const status = await getSystemStatus(config);
     res.json(status);
   });
-  
+
   guiApp.get('/api/logs', async (req, res) => {
     const logs = await getRecentLogs();
     res.json({ logs });
   });
-  
+
   guiApp.get('/api/performance', async (req, res) => {
     const performance = await getPerformanceData(config);
     res.json(performance);
   });
-  
+
   guiApp.get('/api/points', async (req, res) => {
     const points = await getPointsData(config);
     res.json(points);
   });
-  
+
   guiApp.post('/api/install-web-service', async (req, res) => {
     try {
       const result = await installWebServiceFile();
@@ -1251,17 +1361,17 @@ async function startWebGUI(options = {}) {
       res.json({ success: false, error: error.message });
     }
   });
-  
+
   guiApp.get('/api/check-updates', async (req, res) => {
     try {
       const images = [
         'cdrakep/synqchronizer:latest',
         'cdrakep/synqchronizer-test-fixed:latest'
       ];
-      
+
       const updateStatus = [];
       let totalUpdates = 0;
-      
+
       for (const imageName of images) {
         try {
           const hasUpdate = await isNewDockerImageAvailable(imageName);
@@ -1280,7 +1390,7 @@ async function startWebGUI(options = {}) {
           });
         }
       }
-      
+
       res.json({
         success: true,
         totalUpdates,
@@ -1291,28 +1401,28 @@ async function startWebGUI(options = {}) {
       res.json({ success: false, error: error.message });
     }
   });
-  
+
   guiApp.post('/api/pull-image', async (req, res) => {
     try {
       const { imageName } = req.body;
-      
+
       if (!imageName) {
         return res.json({ success: false, error: 'Image name is required' });
       }
-      
+
       // Security check - only allow known synchronizer images
       const allowedImages = [
         'cdrakep/synqchronizer:latest',
         'cdrakep/synqchronizer-test-fixed:latest'
       ];
-      
+
       if (!allowedImages.includes(imageName)) {
         return res.json({ success: false, error: 'Image not allowed' });
       }
-      
+
       execSync(`docker pull ${imageName}`, { stdio: 'pipe' });
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: `Successfully pulled ${imageName}`,
         timestamp: new Date().toISOString()
       });
@@ -1320,18 +1430,18 @@ async function startWebGUI(options = {}) {
       res.json({ success: false, error: error.message });
     }
   });
-  
+
   // Metrics endpoint (no auth required for monitoring)
   metricsApp.get('/metrics', async (req, res) => {
     const metrics = await generateMetrics(config);
     res.json(metrics);
   });
-  
+
   metricsApp.get('/health', async (req, res) => {
     const health = await getHealthStatus();
     res.json(health);
   });
-  
+
   // Start servers sequentially to avoid race conditions
   return new Promise((resolve, reject) => {
     // Start dashboard server first
@@ -1340,12 +1450,12 @@ async function startWebGUI(options = {}) {
       if (config.dashboardPassword) {
         console.log(chalk.gray('   Use any username with your configured password to access'));
       }
-      
+
       // Only start metrics server after dashboard is successfully listening
       const metricsServer = metricsApp.listen(metricsPort, '0.0.0.0', () => {
         console.log(chalk.green(`📊 Metrics API: http://${primaryIP}:${metricsPort}/metrics`));
         console.log(chalk.green(`❤️  Health Check: http://${primaryIP}:${metricsPort}/health`));
-        
+
         // Show local URLs in a separate section if not localhost
         if (primaryIP !== 'localhost') {
           console.log(chalk.blue('\n📍 Local Access:'));
@@ -1353,10 +1463,10 @@ async function startWebGUI(options = {}) {
           console.log(chalk.gray(`   Metrics: http://localhost:${metricsPort}/metrics`));
           console.log(chalk.gray(`   Health: http://localhost:${metricsPort}/health`));
         }
-        
+
         console.log(chalk.blue('\n🔄 Auto-refresh dashboard every 5 seconds'));
         console.log(chalk.gray('Press Ctrl+C to stop the web servers\n'));
-        
+
         // Set up graceful shutdown for both servers
         const shutdown = () => {
           console.log(chalk.yellow('\n🛑 Shutting down web servers...'));
@@ -1365,18 +1475,18 @@ async function startWebGUI(options = {}) {
           metricsServer.close();
           process.exit(0);
         };
-        
+
         process.on('SIGINT', shutdown);
         process.on('SIGTERM', shutdown);
-        
+
         // Keep the process alive
         setInterval(() => {
           // Just keep alive, servers handle requests
         }, 5000);
-        
+
         resolve({ guiServer, metricsServer });
       });
-      
+
       metricsServer.on('error', (err) => {
         console.error(chalk.red('❌ Failed to start metrics server:'), err.message);
         if (err.code === 'EADDRINUSE') {
@@ -1387,7 +1497,7 @@ async function startWebGUI(options = {}) {
         reject(err);
       });
     });
-    
+
     guiServer.on('error', (err) => {
       console.error(chalk.red('❌ Failed to start dashboard server:'), err.message);
       if (err.code === 'EADDRINUSE') {
@@ -1409,23 +1519,23 @@ function clearUsedPorts() {
 
 async function findAvailablePort(startPort) {
   const net = require('net');
-  
+
   return new Promise((resolve, reject) => {
     // Limit the search to prevent infinite loops
     const maxAttempts = 100;
     let attempts = 0;
-    
+
     function tryPort(port) {
       if (attempts >= maxAttempts) {
         reject(new Error(`Could not find available port after ${maxAttempts} attempts starting from ${startPort}`));
         return;
       }
-      
+
       attempts++;
-      
+
       // Create a new server for testing
       const testServer = net.createServer();
-      
+
       testServer.on('error', (err) => {
         if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
           // Port is busy, try the next one
@@ -1435,18 +1545,18 @@ async function findAvailablePort(startPort) {
           tryPort(port + 1);
         }
       });
-      
+
       testServer.on('listening', () => {
         const actualPort = testServer.address().port;
         testServer.close(() => {
           resolve(actualPort);
         });
       });
-      
+
       // Test the port
       testServer.listen(port, '0.0.0.0');
     }
-    
+
     tryPort(startPort);
   });
 }
@@ -1456,10 +1566,10 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
   const showSensitiveData = !config.dashboardPassword || authenticated;
   const maskedKey = showSensitiveData ? config.key : '••••••••-••••-••••-••••-••••••••••••';
   const maskedWallet = showSensitiveData ? config.wallet : '0x••••••••••••••••••••••••••••••••••••••••';
-  
+
   // Use primaryIP for display, fallback to localhost if not provided
   const displayIP = primaryIP || 'localhost';
-  
+
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -1469,7 +1579,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
     <title>Synchronizer Dashboard</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -1483,20 +1593,20 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
         .top-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 20px; }
         .performance-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px; }
         .points-section { width: 100%; margin-bottom: 20px; }
-        .card { 
-            background: rgba(255,255,255,0.1); 
+        .card {
+            background: rgba(255,255,255,0.1);
             backdrop-filter: blur(10px);
-            border-radius: 15px; 
-            padding: 25px; 
+            border-radius: 15px;
+            padding: 25px;
             border: 1px solid rgba(255,255,255,0.2);
         }
         .card h3 { margin-bottom: 15px; font-size: 1.3em; }
-        .status-indicator { 
-            display: inline-block; 
-            width: 12px; 
-            height: 12px; 
-            border-radius: 50%; 
-            margin-right: 8px; 
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
         }
         .status-running { background: #4ade80; }
         .status-stopped { background: #ef4444; }
@@ -1504,11 +1614,11 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
         .metric { margin: 10px 0; }
         .metric-label { opacity: 0.8; }
         .metric-value { font-weight: bold; font-size: 1.1em; }
-        .logs { 
-            background: rgba(0,0,0,0.3); 
-            padding: 15px; 
-            border-radius: 8px; 
-            font-family: 'Courier New', monospace; 
+        .logs {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
             font-size: 0.9em;
             max-height: 400px;
             overflow-y: auto;
@@ -1523,12 +1633,12 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
         .config-label { opacity: 0.8; display: inline-block; width: 120px; }
         .config-value { font-weight: bold; }
         .action-button {
-            background: rgba(255,255,255,0.2); 
-            border: none; 
-            color: white; 
-            padding: 10px 15px; 
-            border-radius: 8px; 
-            margin: 5px; 
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin: 5px;
             cursor: pointer;
             transition: background 0.2s;
         }
@@ -1674,13 +1784,13 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
             <h1>🚀 Synchronizer Dashboard</h1>
             <p>Real-time monitoring and status</p>
         </div>
-        
+
         <div class="top-grid">
             <div class="card">
                 <h3>📊 System Status</h3>
                 <div id="status-content">Loading...</div>
             </div>
-            
+
             <div class="card">
                 <h3>⚙️ Configuration</h3>
                 <div class="config-item">
@@ -1711,7 +1821,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                     <span class="config-value">${os.platform()}/${os.arch()}</span>
                 </div>
             </div>
-            
+
             <div class="card">
                 <h3>🛠️ Quick Actions</h3>
                 <div style="display: flex; flex-direction: column; gap: 10px;">
@@ -1722,26 +1832,26 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                 </div>
             </div>
         </div>
-        
+
         <div class="performance-grid">
             <div class="card">
                 <h3>📈 Performance</h3>
                 <div id="performance-content">Loading...</div>
             </div>
-            
+
             <div class="card">
                 <h3>🎯 Quality of Service</h3>
                 <div id="qos-content">Loading...</div>
             </div>
         </div>
-        
+
         <div class="points-section">
             <div class="card">
                 <h3>🏆 Rewards & Points</h3>
                 <div id="points-content">Loading...</div>
             </div>
         </div>
-        
+
         <div class="api-section">
             <div class="card">
                 <h3>🔗 API Endpoints</h3>
@@ -1794,14 +1904,14 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                 </div>
             </div>
         </div>
-        
+
         <div class="logs-section">
             <div class="card">
                 <h3>📋 Recent Logs</h3>
                 <div class="logs" id="logs-content">Loading logs...</div>
             </div>
         </div>
-        
+
         <div class="refresh-info">
             <p>Auto-refreshing every 5 seconds • Last updated: <span id="last-updated">Never</span></p>
         </div>
@@ -1817,7 +1927,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                 document.getElementById('status-content').innerHTML = '<span style="color: #fca5a5;">Error loading status</span>';
             }
         }
-        
+
         async function fetchLogs() {
             try {
                 const response = await fetch('/api/logs');
@@ -1827,7 +1937,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                 document.getElementById('logs-content').innerHTML = '<span style="color: #fca5a5;">Error loading logs</span>';
             }
         }
-        
+
         async function fetchPerformance() {
             try {
                 const response = await fetch('/api/performance');
@@ -1838,7 +1948,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                 document.getElementById('qos-content').innerHTML = '<span style="color: #fca5a5;">Error loading QoS data</span>';
             }
         }
-        
+
         async function fetchPoints() {
             try {
                 const response = await fetch('/api/points');
@@ -1848,7 +1958,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                 document.getElementById('points-content').innerHTML = '<span style="color: #fca5a5;">Error loading points data</span>';
             }
         }
-        
+
         function updateStatusDisplay(status) {
             const statusHtml = \`
                 <div class="metric">
@@ -1873,9 +1983,9 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                 <div class="metric">
                     <div class="metric-label">Image Updates:</div>
                     <div class="metric-value">
-                        \${status.imageUpdates ? 
-                            (status.imageUpdates.available > 0 ? 
-                                \`🔄 \${status.imageUpdates.available} update(s) available\` : 
+                        \${status.imageUpdates ?
+                            (status.imageUpdates.available > 0 ?
+                                \`🔄 \${status.imageUpdates.available} update(s) available\` :
                                 '✅ All images up to date'
                             ) : '❔ Check pending'
                         }
@@ -1890,26 +2000,26 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
             \`;
             document.getElementById('status-content').innerHTML = statusHtml;
         }
-        
+
         function updateLogsDisplay(logs) {
             if (!logs || logs.length === 0) {
                 document.getElementById('logs-content').innerHTML = '<span style="opacity: 0.6;">No recent logs</span>';
                 return;
             }
-            
+
             const logsHtml = logs.map(log => {
                 let className = 'log-line';
                 if (log.includes('error') || log.includes('ERROR')) className += ' log-error';
                 else if (log.includes('warn') || log.includes('WARNING')) className += ' log-warn';
                 else if (log.includes('info') || log.includes('INFO')) className += ' log-info';
                 else if (log.includes('proxy-connected') || log.includes('registered')) className += ' log-success';
-                
+
                 return \`<div class="\${className}">\${log}</div>\`;
             }).join('');
-            
+
             document.getElementById('logs-content').innerHTML = logsHtml;
         }
-        
+
         function updatePerformanceDisplay(data) {
             // Performance metrics
             const performanceHtml = \`
@@ -1934,15 +2044,15 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                     <span class="performance-value">\${data.performance.users || '0'}</span>
                 </div>
             \`;
-            
+
             // QoS display
             const qos = data.qos || {};
             const score = qos.score || 0;
-            
+
             let qosClass = 'qos-poor';
             let statusClass = 'status-poor';
             let statusText = 'Poor';
-            
+
             if (score >= 80) {
                 qosClass = 'qos-excellent';
                 statusClass = 'status-excellent';
@@ -1952,7 +2062,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                 statusClass = 'status-good';
                 statusText = 'Good';
             }
-            
+
             const qosHtml = \`
                 <div class="qos-score">
                     <div class="qos-circle \${qosClass}">
@@ -1973,15 +2083,15 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                     <span>\${qos.efficiency}%</span>
                 </div>
             \`;
-            
+
             document.getElementById('performance-content').innerHTML = performanceHtml;
             document.getElementById('qos-content').innerHTML = qosHtml;
         }
-        
+
         function updatePointsDisplay(data) {
             const points = data.points || {};
             const totalPoints = points.total || 0;
-            
+
             // Check for errors or fallback mode
             if (data.error) {
                 const errorHtml = '<div style="text-align: center; padding: 20px;">' +
@@ -1992,7 +2102,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                 document.getElementById('points-content').innerHTML = errorHtml;
                 return;
             }
-            
+
             const pointsHtml = \`
                 <div class="points-display">
                     <div class="points-total">
@@ -2030,10 +2140,10 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                     </div>
                 </div>
             \`;
-            
+
             document.getElementById('points-content').innerHTML = pointsHtml;
         }
-        
+
         function formatBytes(bytes) {
             if (bytes === 0) return '0 B';
             const k = 1024;
@@ -2041,22 +2151,22 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
         }
-        
+
         function openMetrics() {
             // Try the detected IP first, then fallback to localhost
             const metricsUrls = [
                 \`http://${displayIP}:${metricsPort}/metrics\`,
                 \`http://localhost:${metricsPort}/metrics\`
             ];
-            
+
             // Open the first URL (primary IP)
             window.open(metricsUrls[0], '_blank');
         }
-        
+
         function toggleSynqKey() {
             const masked = document.getElementById('synq-key-masked');
             const full = document.getElementById('synq-key-full');
-            
+
             if (masked.style.display === 'none') {
                 masked.style.display = 'inline';
                 full.style.display = 'none';
@@ -2065,7 +2175,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                 full.style.display = 'inline';
             }
         }
-        
+
         function installWebService() {
             if (confirm('This will generate a systemd service file for the web dashboard. Continue?')) {
                 fetch('/api/install-web-service', { method: 'POST' })
@@ -2082,7 +2192,7 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
                     });
             }
         }
-        
+
         function refreshData() {
             fetchStatus();
             fetchLogs();
@@ -2090,10 +2200,10 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP) {
             fetchPoints();
             document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
         }
-        
+
         // Initial load
         refreshData();
-        
+
         // Auto-refresh every 5 seconds
         setInterval(refreshData, 5000);
     </script>
@@ -2115,7 +2225,7 @@ async function getSystemStatus(config) {
       images: []
     }
   };
-  
+
   // Check Docker
   try {
     execSync('docker --version', { stdio: 'ignore' });
@@ -2123,16 +2233,16 @@ async function getSystemStatus(config) {
   } catch (error) {
     status.dockerAvailable = false;
   }
-  
+
   // Check systemd service
   try {
     const serviceExists = fs.existsSync('/etc/systemd/system/synchronizer-cli.service');
     if (serviceExists) {
-      const statusOutput = execSync('systemctl status synchronizer-cli --no-pager', { 
+      const statusOutput = execSync('systemctl status synchronizer-cli --no-pager', {
         encoding: 'utf8',
         stdio: 'pipe'
       });
-      
+
       if (statusOutput.includes('active (running)')) {
         status.serviceStatus = 'running';
       } else if (statusOutput.includes('inactive (dead)')) {
@@ -2140,11 +2250,11 @@ async function getSystemStatus(config) {
       } else if (statusOutput.includes('failed')) {
         status.serviceStatus = 'failed';
       }
-      
+
       if (statusOutput.includes('enabled')) {
         status.autoStart = true;
       }
-      
+
       // Extract uptime if running
       const uptimeLine = statusOutput.split('\n').find(line => line.includes('Active:'));
       if (uptimeLine && uptimeLine.includes('since')) {
@@ -2157,7 +2267,7 @@ async function getSystemStatus(config) {
   } catch (error) {
     // Service not found or no permissions
   }
-  
+
   // Check if container is running manually
   try {
     const dockerPs = execSync('docker ps --filter name=synchronizer-cli --format "{{.Names}}"', {
@@ -2168,7 +2278,7 @@ async function getSystemStatus(config) {
   } catch (error) {
     // Docker not available
   }
-  
+
   // Check Docker image updates (quick check, no pulling)
   if (status.dockerAvailable) {
     try {
@@ -2176,10 +2286,10 @@ async function getSystemStatus(config) {
         'cdrakep/synqchronizer:latest',
         'cdrakep/synqchronizer-test-fixed:latest'
       ];
-      
+
       let updatesAvailable = 0;
       const imageStatuses = [];
-      
+
       for (const imageName of images) {
         try {
           // Quick check without pulling
@@ -2197,7 +2307,7 @@ async function getSystemStatus(config) {
           });
         }
       }
-      
+
       status.imageUpdates = {
         available: updatesAvailable,
         lastChecked: new Date().toISOString(),
@@ -2208,17 +2318,17 @@ async function getSystemStatus(config) {
       status.imageUpdates.error = error.message;
     }
   }
-  
+
   return status;
 }
 
 async function getRecentLogs() {
   try {
-    const logsOutput = execSync('journalctl -u synchronizer-cli --no-pager -n 20 --output=short-iso', { 
+    const logsOutput = execSync('journalctl -u synchronizer-cli --no-pager -n 20 --output=short-iso', {
       encoding: 'utf8',
       stdio: 'pipe'
     });
-    
+
     return logsOutput.split('\n').filter(line => line.trim()).slice(-15);
   } catch (error) {
     return ['No logs available or insufficient permissions'];
@@ -2227,7 +2337,7 @@ async function getRecentLogs() {
 
 async function generateMetrics(config) {
   const status = await getSystemStatus(config);
-  
+
   return {
     timestamp: new Date().toISOString(),
     version: packageJson.version,
@@ -2266,9 +2376,9 @@ async function generateMetrics(config) {
 async function getHealthStatus() {
   const config = loadConfig();
   const status = await getSystemStatus(config);
-  
+
   const isHealthy = status.serviceStatus === 'running' && status.dockerAvailable && !!config.key;
-  
+
   return {
     status: isHealthy ? 'healthy' : 'unhealthy',
     timestamp: new Date().toISOString(),
@@ -2282,7 +2392,7 @@ async function getHealthStatus() {
 
 async function getPerformanceData(config) {
   const status = await getSystemStatus(config);
-  
+
   // Get real performance data from the running synchronizer container
   const isRunning = status.serviceStatus === 'running';
   let performance = {
@@ -2292,18 +2402,18 @@ async function getPerformanceData(config) {
     outTraffic: 0,
     users: 0
   };
-  
+
   let qos = {
     score: 0,
     reliability: 0,
-    availability: 0, 
+    availability: 0,
     efficiency: 0
   };
-  
+
   if (isRunning) {
     try {
       const containerStats = await getContainerStats();
-      
+
       if (containerStats) {
         // Use real performance data from the synchronizer
         performance = {
@@ -2313,12 +2423,12 @@ async function getPerformanceData(config) {
           outTraffic: containerStats.bytesOutDelta || 0, // Rate since last update
           users: containerStats.users || 0
         };
-        
+
         // Use real QoS data from the synchronizer (same calculation as electron app)
         const availability = containerStats.availability || 2; // 0=good, 1=ok, 2=poor
         const reliability = containerStats.reliability || 2;
         const efficiency = containerStats.efficiency || 2;
-        
+
         // Real QoS calculation from QoSScore.tsx
         const factors = [1, 0.8, 0.5]; // good, ok, poor
         let qosScore = 100;
@@ -2326,14 +2436,14 @@ async function getPerformanceData(config) {
         qosScore *= factors[reliability] || 0;
         qosScore *= factors[efficiency] || 0;
         qosScore = Math.round(qosScore / 5) * 5;
-        
+
         qos = {
           score: qosScore,
           reliability: reliability === 0 ? 100 : reliability === 1 ? 80 : 20, // Convert to percentage for display
           availability: availability === 0 ? 100 : availability === 1 ? 80 : 20,
           efficiency: efficiency === 0 ? 100 : efficiency === 1 ? 80 : 20
         };
-        
+
         // Removed console.log about using real performance data
       } else {
         // Removed console.log about container not accessible
@@ -2346,11 +2456,11 @@ async function getPerformanceData(config) {
           outTraffic: Math.floor(256 * randomFactor()),
           users: Math.floor(3 * randomFactor())
         };
-        
+
         const reliability = 85 + Math.floor(Math.random() * 10);
         const availability = 90 + Math.floor(Math.random() * 8);
         const efficiency = 75 + Math.floor(Math.random() * 20);
-        
+
         qos = {
           score: Math.floor((reliability + availability + efficiency) / 3),
           reliability: reliability,
@@ -2358,7 +2468,7 @@ async function getPerformanceData(config) {
           efficiency: efficiency
         };
       }
-      
+
     } catch (error) {
       console.error('Error fetching container stats:', error.message);
       // Use fallback calculation
@@ -2370,11 +2480,11 @@ async function getPerformanceData(config) {
         outTraffic: Math.floor(256 * randomFactor()),
         users: Math.floor(3 * randomFactor())
       };
-      
+
       const reliability = 85 + Math.floor(Math.random() * 10);
       const availability = 90 + Math.floor(Math.random() * 8);
       const efficiency = 75 + Math.floor(Math.random() * 20);
-      
+
       qos = {
         score: Math.floor((reliability + availability + efficiency) / 3),
         reliability: reliability,
@@ -2387,7 +2497,7 @@ async function getPerformanceData(config) {
     const reliability = isRunning ? 85 + Math.floor(Math.random() * 10) : 30;
     const availability = isRunning ? 90 + Math.floor(Math.random() * 8) : 25;
     const efficiency = isRunning ? 75 + Math.floor(Math.random() * 20) : 20;
-    
+
     // If Docker not available, reduce scores
     if (!status.dockerAvailable) {
       qos.reliability = Math.max(0, reliability - 40);
@@ -2398,7 +2508,7 @@ async function getPerformanceData(config) {
       qos.availability = availability;
       qos.efficiency = efficiency;
     }
-    
+
     qos.score = Math.floor((qos.reliability + qos.availability + qos.efficiency) / 3);
   }
 
@@ -2429,14 +2539,14 @@ async function getPointsData(config) {
   // First try to get real data from the new simple API
   try {
     const apiData = await fetchWalletLifetimePoints(null, config.wallet, config);
-    
+
     if (apiData.success) {
       console.log(chalk.green('✅ Retrieved real wallet lifetime points from API'));
-      
+
       // Format the API data into our points structure
       const data = apiData.data;
       const walletLifePoints = data.lifetimePoints || 0;
-      
+
       // Create our standardized response format with real data
       return {
         timestamp: new Date().toISOString(),
@@ -2469,7 +2579,7 @@ async function getPointsData(config) {
   // If API fails, continue with existing container stats approach
   try {
     const containerStats = await getContainerStats();
-    
+
     if (!containerStats) {
       return {
         timestamp: new Date().toISOString(),
@@ -2486,15 +2596,15 @@ async function getPointsData(config) {
         fallback: true
       };
     }
-    
+
     // Get wallet lifetime points from registry via container - just like Electron app
     // This is the equivalent of: latestStat?.walletLifePoints
     const walletLifePoints = containerStats.walletLifePoints || 0;
-    
+
     // For display purposes, calculate basic breakdown based on current running status
     // Note: Real breakdown would come from API if available
     const currentPoints = containerStats.isEarningPoints ? Math.floor(containerStats.uptimeHours || 0) : 0;
-    
+
     return {
       timestamp: new Date().toISOString(),
       points: {
@@ -2511,10 +2621,10 @@ async function getPointsData(config) {
       isEarning: containerStats.isEarningPoints,
       connectionState: containerStats.proxyConnectionState
     };
-    
+
   } catch (error) {
     console.error('Error fetching points from container:', error.message);
-    
+
     return {
       timestamp: new Date().toISOString(),
       points: {
@@ -2537,7 +2647,7 @@ async function getContainerStats() {
     // Check for either synchronizer container
     const containerNames = ['synchronizer-cli', 'synchronizer-nightly'];
     let containerName = null;
-    
+
     // Find which container is running
     for (const name of containerNames) {
       try {
@@ -2545,7 +2655,7 @@ async function getContainerStats() {
           encoding: 'utf8',
           stdio: 'pipe'
         });
-        
+
         if (psOutput.includes(name)) {
           containerName = name;
           break;
@@ -2554,29 +2664,29 @@ async function getContainerStats() {
         // Continue checking next container name
       }
     }
-    
+
     if (!containerName) {
       // No synchronizer container running
       return null;
     }
-    
+
     // Container is running, proceed with stats gathering
-    
+
     // Check how long the container has been running
     const inspectOutput = execSync(`docker inspect ${containerName} --format "{{.State.StartedAt}}"`, {
       encoding: 'utf8',
       stdio: 'pipe'
     });
-    
+
     const startTime = new Date(inspectOutput.trim());
     const now = new Date();
     const uptimeMs = now.getTime() - startTime.getTime();
     const uptimeHours = uptimeMs / (1000 * 60 * 60);
-    
+
     // Try to get comprehensive logs to extract real stats
     let isEarningPoints = false;
     let realStats = null;
-    
+
     try {
       // Get more comprehensive logs to look for stats data
       const logsOutput = execSync(`docker logs ${containerName} --tail 100`, {
@@ -2584,14 +2694,14 @@ async function getContainerStats() {
         stdio: 'pipe',
         timeout: 10000
       });
-      
+
       // Look for signs that the synchronizer is actually working
-      isEarningPoints = logsOutput.includes('proxy-connected') || 
+      isEarningPoints = logsOutput.includes('proxy-connected') ||
                        logsOutput.includes('registered') ||
                        logsOutput.includes('session') ||
                        logsOutput.includes('traffic') ||
                        logsOutput.includes('stats');
-      
+
       // Try to extract real stats from logs if available
       // Look for JSON stats messages in the logs
       const logLines = logsOutput.split('\n');
@@ -2607,7 +2717,7 @@ async function getContainerStats() {
               break;
             }
           }
-          
+
           // Look for UPDATE_TALLIES messages from the registry
           const updateTalliesMatch = line.match(/\{.*"what":\s*"UPDATE_TALLIES".*\}/);
           if (updateTalliesMatch) {
@@ -2619,19 +2729,19 @@ async function getContainerStats() {
               realStats.syncLifeTraffic = talliesData.lifeTraffic || realStats.syncLifeTraffic;
             }
           }
-          
+
           // Look for stats patterns with "walletPoints" (no "Life")
           const walletPointsMatch = line.match(/walletPoints[:\s]+(\d+)/i);
           if (walletPointsMatch) {
             realStats = realStats || {};
             realStats.walletLifePoints = parseInt(walletPointsMatch[1]);
           }
-          
+
           // Also look for other stat patterns
           const pointsMatch = line.match(/points[:\s]+(\d+)/i);
           const trafficMatch = line.match(/traffic[:\s]+(\d+)/i);
           const sessionsMatch = line.match(/sessions[:\s]+(\d+)/i);
-          
+
           if (pointsMatch || trafficMatch || sessionsMatch) {
             realStats = realStats || {};
             if (pointsMatch) realStats.syncLifePoints = parseInt(pointsMatch[1]);
@@ -2642,11 +2752,11 @@ async function getContainerStats() {
           // Continue looking through logs
         }
       }
-      
+
     } catch (logError) {
       // Could not read container logs
     }
-    
+
     // Try to execute a command inside the container to get stats
     if (!realStats) {
       try {
@@ -2656,7 +2766,7 @@ async function getContainerStats() {
           stdio: 'pipe',
           timeout: 5000
         });
-        
+
         // If we can execute commands, the container is healthy
         if (execOutput.includes('node')) {
           isEarningPoints = true;
@@ -2665,10 +2775,10 @@ async function getContainerStats() {
         // Could not execute command in container
       }
     }
-    
+
     // Use real stats if found, otherwise calculate based on container state
     let basePoints, baseTraffic, sessions, users;
-    
+
     if (realStats) {
       // Use real data from container
       basePoints = realStats.syncLifePoints || realStats.walletLifePoints || 0;
@@ -2684,7 +2794,7 @@ async function getContainerStats() {
       users = isEarningPoints ? Math.floor(Math.random() * 3) + 1 : 0;
       // Removed console.log about using calculated stats
     }
-    
+
     // Return comprehensive stats that reflect actual container state
     return {
       bytesIn: Math.floor(baseTraffic * 0.6), // 60% of traffic is inbound
@@ -2707,7 +2817,7 @@ async function getContainerStats() {
       hasRealStats: !!realStats,
       containerStartTime: startTime.toISOString()
     };
-    
+
   } catch (error) {
     console.log('Error checking container stats:', error.message);
     return null;
@@ -2723,20 +2833,20 @@ async function installWebServiceFile() {
   const serviceFile = path.join(CONFIG_DIR, 'synchronizer-cli-web.service');
   const user = os.userInfo().username;
   const npxPath = detectNpxPath();
-  
+
   // Get the directory containing npx for PATH
   const npxDir = path.dirname(npxPath);
-  
+
   // Build PATH environment variable including npx directory
   const systemPaths = [
     '/usr/local/sbin',
-    '/usr/local/bin', 
+    '/usr/local/bin',
     '/usr/sbin',
     '/usr/bin',
     '/sbin',
     '/bin'
   ];
-  
+
   // Add npx directory to the beginning of PATH if it's not already a system path
   const pathDirs = systemPaths.includes(npxDir) ? systemPaths : [npxDir, ...systemPaths];
   const pathEnv = pathDirs.join(':');
@@ -2760,7 +2870,7 @@ WantedBy=multi-user.target
 `;
 
   fs.writeFileSync(serviceFile, unit);
-  
+
   const instructions = `sudo cp ${serviceFile} /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable synchronizer-cli-web
@@ -2790,13 +2900,13 @@ async function showPoints() {
   try {
     const pointsData = await getPointsData(config);
     const containerStats = await getContainerStats();
-    
+
     console.log(chalk.cyan(`🔗 Wallet: ${config.wallet}`));
     if (config.syncHash) {
       console.log(chalk.cyan(`🔑 Sync Hash: ${config.syncHash}`));
     }
     console.log('');
-    
+
     if (pointsData.error) {
       console.log(chalk.red(`❌ Error: ${pointsData.error}`));
       if (pointsData.fallback) {
@@ -2804,7 +2914,7 @@ async function showPoints() {
       }
     } else {
       console.log(chalk.green('✅ Points data retrieved successfully'));
-      
+
       // Show the data source (API is more accurate than container stats)
       if (pointsData.source === 'api') {
         console.log(chalk.green('🔗 Using real data from wallet API (most accurate)'));
@@ -2819,11 +2929,11 @@ async function showPoints() {
         console.log(chalk.yellow('📊 Using calculated stats based on container uptime'));
       }
     }
-    
+
     console.log('');
     console.log(chalk.bold('📈 LIFETIME POINTS BREAKDOWN:'));
     console.log('');
-    
+
     const points = pointsData.points;
     console.log(chalk.yellow(`💎 Total Points:    ${chalk.bold(points.total.toLocaleString())}`));
     console.log(chalk.blue(`📅 Today:           ${chalk.bold(points.daily.toLocaleString())}`));
@@ -2832,26 +2942,26 @@ async function showPoints() {
     console.log(chalk.green(`🔥 Streak:          ${chalk.bold(points.streak)} days`));
     console.log(chalk.magenta(`🏆 Rank:            ${chalk.bold(points.rank)}`));
     console.log(chalk.cyan(`⚡ Multiplier:      ${chalk.bold(points.multiplier)}x`));
-    
+
     // Display API-specific details if available
     if (pointsData.source === 'api' && pointsData.apiExtras) {
       console.log('');
       console.log(chalk.bold('🌟 API DETAILS:'));
       console.log('');
-      
+
       if (pointsData.apiExtras.lastWithdrawn !== undefined) {
         console.log(chalk.blue(`💸 Last Withdrawn:  ${chalk.bold(pointsData.apiExtras.lastWithdrawn.toLocaleString())} points`));
       }
-      
+
       if (pointsData.apiExtras.lastUpdated) {
         console.log(chalk.blue(`⏰ Last Updated:    ${chalk.bold(new Date(pointsData.apiExtras.lastUpdated).toLocaleString())}`));
       }
-      
+
       if (pointsData.apiExtras.activeSynchronizers) {
         console.log(chalk.blue(`🔄 Active Synchs:   ${chalk.bold(pointsData.apiExtras.activeSynchronizers)}`));
       }
     }
-    
+
     if (containerStats) {
       console.log('');
       console.log(chalk.bold('🐳 CONTAINER STATUS:'));
@@ -2862,19 +2972,19 @@ async function showPoints() {
       console.log(chalk.blue(`🔗 Connection:      ${chalk.bold(containerStats.proxyConnectionState)}`));
       console.log(chalk.blue(`👥 Sessions:        ${chalk.bold(containerStats.sessions)}`));
       console.log(chalk.blue(`👤 Users:           ${chalk.bold(containerStats.users)}`));
-      
+
       const totalTraffic = containerStats.bytesIn + containerStats.bytesOut;
       const trafficMB = (totalTraffic / (1024 * 1024)).toFixed(2);
       console.log(chalk.blue(`📊 Traffic:         ${chalk.bold(trafficMB)} MB`));
     }
-    
+
     console.log('');
     console.log(chalk.gray(`🕐 Last updated: ${new Date(pointsData.timestamp).toLocaleString()}`));
-    
+
     if (pointsData.source) {
       console.log(chalk.gray(`📡 Data source: ${pointsData.source}`));
     }
-    
+
   } catch (error) {
     console.error(chalk.red('❌ Error fetching points data:'), error.message);
     process.exit(1);
@@ -2886,17 +2996,17 @@ async function setDashboardPassword() {
   console.log(chalk.yellow('Configure password protection for the web dashboard\n'));
 
   const config = loadConfig();
-  
+
   if (config.dashboardPassword) {
     console.log(chalk.yellow('Dashboard password is currently set.'));
-    
+
     const changePassword = await inquirer.prompt([{
       type: 'confirm',
       name: 'change',
       message: 'Do you want to change the existing password?',
       default: false
     }]);
-    
+
     if (!changePassword.change) {
       console.log(chalk.gray('Password unchanged.'));
       return;
@@ -2938,10 +3048,10 @@ async function setDashboardPassword() {
   }];
 
   const { password } = await inquirer.prompt(passwordQuestions);
-  
+
   config.dashboardPassword = password;
   saveConfig(config);
-  
+
   console.log(chalk.green('✅ Dashboard password set successfully'));
   console.log(chalk.blue('🔒 Dashboard is now password protected'));
   console.log(chalk.gray('Use any username with your password to access the web dashboard'));
@@ -2950,7 +3060,7 @@ async function setDashboardPassword() {
 
 async function validateSynqKey(keyToValidate) {
   let nicknameToUse = 'cli-validator'; // Default nickname
-  
+
   // If no key is provided, prompt for one
   if (!keyToValidate) {
     const answers = await inquirer.prompt([
@@ -2967,7 +3077,7 @@ async function validateSynqKey(keyToValidate) {
         default: nicknameToUse
       }
     ]);
-    
+
     keyToValidate = answers.key;
     nicknameToUse = answers.nickname;
   } else {
@@ -2978,37 +3088,37 @@ async function validateSynqKey(keyToValidate) {
       message: 'Enter a nickname for validation (optional):',
       default: nicknameToUse
     }]);
-    
+
     nicknameToUse = answer.nickname;
   }
-  
+
   console.log(chalk.blue('🔑 Synq Key Validation'));
   console.log(chalk.gray('Validating synq key format and availability\n'));
   console.log(chalk.gray(`Using nickname: ${nicknameToUse}`));
-  
+
   // First validate the format locally
   console.log(chalk.cyan('Checking key format...'));
   const isValidFormat = validateSynqKeyFormat(keyToValidate);
-  
+
   if (!isValidFormat) {
     console.log(chalk.red('❌ Invalid key format'));
     console.log(chalk.yellow('Key must be in UUID v4 format:'));
     console.log(chalk.gray('XXXXXXXX-XXXX-4XXX-YXXX-XXXXXXXXXXXX where Y is 8, 9, A, or B'));
     return;
   }
-  
+
   console.log(chalk.green('✅ Key format is valid'));
-  
+
   // If format is valid, check with API
   console.log(chalk.cyan('\nChecking key with remote API...'));
   const apiResult = await validateSynqKeyWithAPI(keyToValidate, nicknameToUse);
-  
+
   if (apiResult.isValid) {
     console.log(chalk.green('✅ Key is valid and available for use'));
     console.log(chalk.gray(`API Response: ${apiResult.message}`));
   } else {
     console.log(chalk.red(`❌ API validation failed: ${apiResult.message}`));
-    
+
     // Provide helpful context based on error message
     if (apiResult.message.includes('does not exist')) {
       console.log(chalk.yellow('This key does not exist in the system.'));
@@ -3041,11 +3151,11 @@ async function fetchWalletLifetimePoints(key, wallet, config = {}) {
   const cache = loadWalletPointsCache();
   const cacheKey = wallet;
   const cachedData = cache[cacheKey];
-  
+
   if (cachedData) {
     const age = Date.now() - cachedData.timestamp;
     const maxAge = cachedData.response.success ? CACHE_DURATION : ERROR_CACHE_DURATION;
-    
+
     if (age < maxAge) {
       const remaining = Math.floor((maxAge - age) / 1000);
       const cacheType = cachedData.response.success ? 'cached' : 'cached error';
@@ -3056,31 +3166,31 @@ async function fetchWalletLifetimePoints(key, wallet, config = {}) {
 
   try {
     console.log(chalk.gray(`Fetching wallet lifetime points from API...`));
-    
+
     // Use the simple new API endpoint
     const response = await fetch(`https://www.startsynqing.com/api/external/multisynq/synqers/${wallet}`);
-    
+
     if (!response.ok) {
-      const errorResponse = { 
-        success: false, 
-        error: `API returned ${response.status}: ${response.statusText}` 
+      const errorResponse = {
+        success: false,
+        error: `API returned ${response.status}: ${response.statusText}`
       };
-      
+
       // Cache error responses for shorter duration to avoid hammering the API on failures
       cache[cacheKey] = {
         timestamp: Date.now(),
         response: errorResponse
       };
       saveWalletPointsCache(cache);
-      
+
       return errorResponse;
     }
-    
+
     const data = await response.json();
-    
+
     // Transform the API response to our format
-    const apiResponse = { 
-      success: true, 
+    const apiResponse = {
+      success: true,
       data: {
         lifetimePoints: data.lifetimePoints || data.serviceCredits || 0,
         lastWithdrawn: data.lastWithdrawn || data.lastWithdrawnCredits || 0,
@@ -3094,28 +3204,28 @@ async function fetchWalletLifetimePoints(key, wallet, config = {}) {
         ...data
       }
     };
-    
+
     // Cache the successful response
     cache[cacheKey] = {
       timestamp: Date.now(),
       response: apiResponse
     };
     saveWalletPointsCache(cache);
-    
+
     return apiResponse;
   } catch (error) {
-    const errorResponse = { 
-      success: false, 
-      error: `Failed to fetch from API: ${error.message}` 
+    const errorResponse = {
+      success: false,
+      error: `Failed to fetch from API: ${error.message}`
     };
-    
+
     // Cache error responses for shorter duration to avoid hammering the API on failures
     cache[cacheKey] = {
       timestamp: Date.now(),
       response: errorResponse
     };
     saveWalletPointsCache(cache);
-    
+
     return errorResponse;
   }
 }
@@ -3138,7 +3248,7 @@ async function startNightly() {
   // Check if Docker is installed
   if (!checkDocker()) {
     console.error(chalk.red('Docker is not installed or not accessible.'));
-    
+
     const shouldInstall = await inquirer.prompt([{
       type: 'confirm',
       name: 'install',
@@ -3148,7 +3258,7 @@ async function startNightly() {
 
     if (shouldInstall.install) {
       await installDocker();
-      
+
       // Check again after installation
       if (!checkDocker()) {
         console.error(chalk.red('Docker installation may have failed or requires a restart.'));
@@ -3160,7 +3270,7 @@ async function startNightly() {
       process.exit(1);
     }
   }
-  
+
   const syncName = config.syncHash;
   const containerName = 'synchronizer-nightly';
 
@@ -3170,14 +3280,14 @@ async function startNightly() {
       encoding: 'utf8',
       stdio: 'pipe'
     });
-    
+
     if (runningContainers.includes(containerName)) {
       console.log(chalk.green(`✅ Found existing nightly container running`));
       console.log(chalk.cyan(`🔗 Connecting to logs... (Ctrl+C will stop the container)`));
-      
+
       // Connect to the existing container's logs
       const logProc = spawn('docker', ['logs', '-f', containerName], { stdio: 'inherit' });
-      
+
       // Handle Ctrl+C to stop the container
       const cleanup = () => {
         console.log(chalk.yellow('\n🛑 Stopping nightly container...'));
@@ -3189,14 +3299,14 @@ async function startNightly() {
         }
         process.exit(0);
       };
-      
+
       process.on('SIGINT', cleanup);
       process.on('SIGTERM', cleanup);
-      
+
       logProc.on('exit', (code) => {
         process.exit(code);
       });
-      
+
       return;
     }
   } catch (error) {
@@ -3207,7 +3317,7 @@ async function startNightly() {
   const arch = os.arch();
   const platform = os.platform();
   let dockerPlatform = 'linux/amd64'; // Default to amd64
-  
+
   if (platform === 'linux') {
     if (arch === 'arm64' || arch === 'aarch64') {
       dockerPlatform = 'linux/arm64';
@@ -3226,15 +3336,15 @@ async function startNightly() {
 
   // Use the FIXED nightly test image
   const imageName = 'cdrakep/synqchronizer-test-fixed:latest';
-  
+
   // Check if we need to pull the latest Docker image
   const shouldPull = await isNewDockerImageAvailable(imageName);
-  
+
   // Pull the latest image only if necessary
   if (shouldPull) {
     console.log(chalk.cyan('Pulling latest nightly test image...'));
     try {
-      execSync(`docker pull ${imageName}`, { 
+      execSync(`docker pull ${imageName}`, {
         stdio: ['ignore', 'pipe', 'pipe']
       });
       console.log(chalk.green('✅ Nightly test image pulled successfully'));
@@ -3256,30 +3366,30 @@ async function startNightly() {
     '--platform', dockerPlatform,
     imageName
   ];
-  
+
   // Add container arguments correctly - each flag and value as separate items
   if (config.depin) {
     args.push('--depin');
     args.push(config.depin);
   } else {
     args.push('--depin');
-    args.push('wss://api.multisynq.io/depin');
+    args.push('prod');
   }
-  
+
   args.push('--sync-name');
   args.push(syncName);
-  
+
   args.push('--launcher');
   args.push(launcherWithVersion);
-  
+
   args.push('--key');
   args.push(config.key);
-  
+
   if (config.wallet) {
     args.push('--wallet');
     args.push(config.wallet);
   }
-  
+
   if (config.account) {
     args.push('--account');
     args.push(config.account);
@@ -3287,9 +3397,9 @@ async function startNightly() {
 
   // For debugging
   console.log(chalk.gray(`Running command: ${dockerCmd} ${args.join(' ')}`));
-  
+
   const proc = spawn(dockerCmd, args, { stdio: 'inherit' });
-  
+
   // Handle Ctrl+C to stop the container
   const cleanup = () => {
     console.log(chalk.yellow('\n🛑 Stopping nightly container...'));
@@ -3301,10 +3411,10 @@ async function startNightly() {
     }
     process.exit(0);
   };
-  
+
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
-  
+
   proc.on('error', (err) => {
     if (err.code === 'ENOENT') {
       console.error(chalk.red('Docker command not found. Please ensure Docker is installed and in your PATH.'));
@@ -3313,7 +3423,7 @@ async function startNightly() {
     }
     process.exit(1);
   });
-  
+
   proc.on('exit', code => {
     if (code === 126) {
       console.error(chalk.red('❌ Docker permission denied.'));
@@ -3344,21 +3454,21 @@ async function testNightly() {
     console.error(chalk.red('Missing synq key. Run `synchronize init` first.'));
     process.exit(1);
   }
-  
+
   const syncName = config.syncHash;
   console.log(chalk.magenta(`🧪 TEST NIGHTLY - Running NIGHTLY TEST synchronizer "${syncName}" with wallet ${config.wallet || '[none]'}`));
   console.log(chalk.yellow(`⚠️  This is a direct Docker command execution test`));
-  
+
   // Use simple shell execution for testing
-  const shellCommand = `docker run --rm --name synchronizer-nightly --platform linux/$(uname -m | sed 's/x86_64/amd64/' | sed 's/arm64/arm64/') cdrakep/synqchronizer-test:latest --depin wss://api.multisynq.io/depin --sync-name "${syncName}" --launcher nightly-test-2.0.1 --key "${config.key}" ${config.wallet ? `--wallet "${config.wallet}"` : ''}`;
-  
+  const shellCommand = `docker run --rm --name synchronizer-nightly --platform linux/$(uname -m | sed 's/x86_64/amd64/' | sed 's/arm64/arm64/') cdrakep/synqchronizer-test:latest --depin "${config.depin}" --sync-name "${syncName}" --launcher nightly-test-2.0.1 --key "${config.key}" ${config.wallet ? `--wallet "${config.wallet}"` : ''}`;
+
   console.log(chalk.gray(`Executing: ${shellCommand}`));
-  
+
   // Run as direct shell command
   const child = require('child_process').spawn('/bin/sh', ['-c', shellCommand], {
     stdio: 'inherit'
   });
-  
+
   child.on('exit', (code) => {
     process.exit(code || 0);
   });
@@ -3381,21 +3491,21 @@ async function checkImageUpdates() {
   for (const image of images) {
     console.log(chalk.cyan(`Checking ${image.description}...`));
     console.log(chalk.gray(`Image: ${image.name}`));
-    
+
     try {
       const hasUpdate = await isNewDockerImageAvailable(image.name);
-      
+
       if (hasUpdate) {
         console.log(chalk.yellow(`🔄 Update available for ${image.name}`));
         updatesAvailable++;
-        
+
         const shouldPull = await inquirer.prompt([{
           type: 'confirm',
           name: 'pull',
           message: `Pull latest version of ${image.name}?`,
           default: true
         }]);
-        
+
         if (shouldPull.pull) {
           try {
             console.log(chalk.cyan(`Pulling ${image.name}...`));
@@ -3408,7 +3518,7 @@ async function checkImageUpdates() {
       } else {
         console.log(chalk.green(`✅ ${image.name} is up to date`));
       }
-      
+
       console.log(''); // Add spacing between images
     } catch (error) {
       console.log(chalk.red(`❌ Error checking ${image.name}: ${error.message}`));
@@ -3422,7 +3532,7 @@ async function checkImageUpdates() {
   } else {
     console.log(chalk.yellow(`🔄 ${updatesAvailable} image(s) had updates available`));
   }
-  
+
   console.log(chalk.gray('\n💡 Tip: Use `synchronize monitor` to automatically check for updates'));
 }
 
@@ -3434,7 +3544,7 @@ async function startImageMonitoring() {
   console.log(chalk.yellow('Background service to check for image updates every 30 minutes\n'));
 
   const config = loadConfig();
-  
+
   // Configuration for monitoring
   const monitoringConfig = {
     checkInterval: 30 * 60 * 1000, // 30 minutes in milliseconds
@@ -3458,19 +3568,19 @@ async function startImageMonitoring() {
   const performCheck = async () => {
     checkCount++;
     const timestamp = new Date().toLocaleString();
-    
+
     console.log(chalk.blue(`🔍 Check #${checkCount} at ${timestamp}`));
-    
+
     let updatesFound = 0;
-    
+
     for (const imageName of images) {
       try {
         const hasUpdate = await isNewDockerImageAvailable(imageName);
-        
+
         if (hasUpdate) {
           updatesFound++;
           console.log(chalk.yellow(`🔄 Update available: ${imageName}`));
-          
+
           if (monitoringConfig.autoUpdate) {
             try {
               console.log(chalk.cyan(`⬇️ Auto-updating ${imageName}...`));
@@ -3487,7 +3597,7 @@ async function startImageMonitoring() {
         console.log(chalk.red(`❌ Error checking ${imageName}: ${error.message}`));
       }
     }
-    
+
     if (updatesFound === 0) {
       console.log(chalk.green(`✅ All ${images.length} images are up to date`));
     } else {
@@ -3496,7 +3606,7 @@ async function startImageMonitoring() {
         console.log(chalk.gray('   Run `synchronize check-updates` to update manually'));
       }
     }
-    
+
     console.log(chalk.gray(`⏰ Next check in ${monitoringConfig.checkInterval / 60000} minutes\n`));
   };
 
@@ -3531,20 +3641,20 @@ async function installImageMonitoringService() {
   const serviceFile = path.join(CONFIG_DIR, 'synchronizer-cli-monitor.service');
   const user = os.userInfo().username;
   const npxPath = detectNpxPath();
-  
+
   // Get the directory containing npx for PATH
   const npxDir = path.dirname(npxPath);
-  
+
   // Build PATH environment variable including npx directory
   const systemPaths = [
     '/usr/local/sbin',
-    '/usr/local/bin', 
+    '/usr/local/bin',
     '/usr/sbin',
     '/usr/bin',
     '/sbin',
     '/bin'
   ];
-  
+
   // Add npx directory to the beginning of PATH if it's not already a system path
   const pathDirs = systemPaths.includes(npxDir) ? systemPaths : [npxDir, ...systemPaths];
   const pathEnv = pathDirs.join(':');
@@ -3569,7 +3679,7 @@ WantedBy=multi-user.target
 `;
 
   fs.writeFileSync(serviceFile, unit);
-  
+
   const instructions = `sudo cp ${serviceFile} /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable synchronizer-cli-monitor
@@ -3617,9 +3727,9 @@ async function setupViaEnterpriseAPI() {
   try {
     // Call Enterprise API to create synchronizer
     const apiUrl = 'https://startsynqing.com/api/synq-keys/enterprise/synchronizer';
-    
+
     const requestBody = synchronizerName ? { name: synchronizerName } : {};
-    
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -3632,26 +3742,26 @@ async function setupViaEnterpriseAPI() {
     if (!response.ok) {
       const errorText = await response.text();
       let errorMessage = `API request failed (${response.status})`;
-      
+
       try {
         const errorJson = JSON.parse(errorText);
         errorMessage = errorJson.message || errorMessage;
       } catch (parseError) {
         errorMessage = errorText || errorMessage;
       }
-      
+
       throw new Error(errorMessage);
     }
 
     const result = await response.json();
-    
+
     if (!result.success || !result.synchronizer) {
       throw new Error(result.message || 'Failed to create synchronizer');
     }
 
     const synchronizer = result.synchronizer;
     const finalName = synchronizer.name || synchronizer.id;
-    
+
     console.log(chalk.green('✅ Synchronizer created successfully!'));
     console.log(chalk.gray(`   ID: ${synchronizer.id}`));
     console.log(chalk.gray(`   Name: ${finalName}`));
@@ -3700,7 +3810,7 @@ async function setupViaEnterpriseAPI() {
       secret,
       hostname,
       syncHash,
-      depin: 'wss://api.multisynq.io/depin',
+      depin: 'prod',
       launcher: 'cli',
       enterpriseApiKey: enterpriseApiKey, // Store for future use
       synchronizerId: synchronizer.id
@@ -3712,16 +3822,16 @@ async function setupViaEnterpriseAPI() {
 
     // Save configuration
     saveConfig(config);
-    
+
     console.log(chalk.green('\n🎉 Enterprise API setup complete!'));
     console.log(chalk.blue('📁 Configuration saved to'), CONFIG_FILE);
     console.log(chalk.cyan(`🔗 Sync Name: ${syncHash}`));
     console.log(chalk.cyan(`🆔 Synchronizer ID: ${synchronizer.id}`));
-    
+
     if (dashboardPassword) {
       console.log(chalk.yellow('🔒 Dashboard password protection enabled'));
     }
-    
+
     // Ask what to do next
     const nextActionQuestion = await inquirer.prompt([{
       type: 'input',
@@ -3738,7 +3848,7 @@ async function setupViaEnterpriseAPI() {
     }]);
 
     const action = nextActionQuestion.action.toLowerCase().trim();
-    
+
     if (action === 'start' || action === 's') {
       console.log(chalk.cyan('\n🚀 Starting synchronizer...'));
       await start();
@@ -3759,7 +3869,7 @@ async function setupViaEnterpriseAPI() {
   } catch (error) {
     console.error(chalk.red('❌ Enterprise API setup failed:'));
     console.error(chalk.red(error.message));
-    
+
     if (error.message.includes('401') || error.message.includes('Unauthorized')) {
       console.error(chalk.yellow('\n💡 Troubleshooting:'));
       console.error(chalk.gray('• Check that your Enterprise API Key is correct'));
@@ -3770,7 +3880,7 @@ async function setupViaEnterpriseAPI() {
     } else if (error.message.includes('ENOTFOUND') || error.message.includes('network')) {
       console.error(chalk.yellow('\n💡 Network error. Check your internet connection and try again.'));
     }
-    
+
     process.exit(1);
   }
 }
@@ -3786,9 +3896,9 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
   try {
     // First, call the Enterprise API to get preferences
     console.log(chalk.cyan('🔄 Fetching preferences from Enterprise API...'));
-    
+
     const preferencesUrl = 'https://startsynqing.com/api/synq-keys/enterprise/preferences';
-    
+
     const preferencesResponse = await fetch(preferencesUrl, {
       method: 'GET',
       headers: {
@@ -3800,19 +3910,19 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
     if (!preferencesResponse.ok) {
       const errorText = await preferencesResponse.text();
       let errorMessage = `Failed to fetch preferences (${preferencesResponse.status})`;
-      
+
       try {
         const errorJson = JSON.parse(errorText);
         errorMessage = errorJson.message || errorMessage;
       } catch (parseError) {
         errorMessage = errorText || errorMessage;
       }
-      
+
       throw new Error(errorMessage);
     }
 
     const preferencesResult = await preferencesResponse.json();
-    
+
     if (!preferencesResult.success) {
       throw new Error(preferencesResult.message || 'Failed to fetch preferences');
     }
@@ -3828,12 +3938,12 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
 
     // Create synchronizer using Enterprise API
     console.log(chalk.cyan('\n🔄 Creating synchronizer via Enterprise API...'));
-    
+
     const apiUrl = 'https://startsynqing.com/api/synq-keys/enterprise/synchronizer';
-    
+
     // Use a default name if none provided in preferences
     const requestBody = {};
-    
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -3846,26 +3956,26 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
     if (!response.ok) {
       const errorText = await response.text();
       let errorMessage = `API request failed (${response.status})`;
-      
+
       try {
         const errorJson = JSON.parse(errorText);
         errorMessage = errorJson.message || errorMessage;
       } catch (parseError) {
         errorMessage = errorText || errorMessage;
       }
-      
+
       throw new Error(errorMessage);
     }
 
     const result = await response.json();
-    
+
     if (!result.success || !result.synchronizer) {
       throw new Error(result.message || 'Failed to create synchronizer');
     }
 
     const synchronizer = result.synchronizer;
     const finalName = synchronizer.name || synchronizer.id;
-    
+
     console.log(chalk.green('✅ Synchronizer created successfully!'));
     console.log(chalk.gray(`   ID: ${synchronizer.id}`));
     console.log(chalk.gray(`   Name: ${finalName}`));
@@ -3873,7 +3983,7 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
 
     // Use wallet from preferences or fallback to owner wallet
     const walletAddress = preferences.walletAddress || owner.walletAddress;
-    
+
     if (!walletAddress) {
       throw new Error('No wallet address found in preferences or owner information');
     }
@@ -3890,7 +4000,7 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
       secret,
       hostname,
       syncHash,
-      depin: 'wss://api.multisynq.io/depin',
+      depin: 'prod',
       launcher: 'cli',
       enterpriseApiKey: apiKey,
       synchronizerId: synchronizer.id
@@ -3903,13 +4013,13 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
 
     // Save configuration
     saveConfig(config);
-    
+
     console.log(chalk.green('\n🎉 Automatic Enterprise API setup complete!'));
     console.log(chalk.blue('📁 Configuration saved to'), CONFIG_FILE);
     console.log(chalk.cyan(`🔗 Sync Name: ${syncHash}`));
     console.log(chalk.cyan(`🆔 Synchronizer ID: ${synchronizer.id}`));
     console.log(chalk.cyan(`💰 Wallet: ${walletAddress}`));
-    
+
     if (config.dashboardPassword) {
       console.log(chalk.yellow('🔒 Dashboard password protection enabled'));
     } else {
@@ -3927,9 +4037,9 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
 
     // Execute default action from preferences
     const defaultAction = preferences.defaultAction || 'start';
-    
+
     console.log(chalk.cyan(`\n🚀 Executing default action: ${defaultAction}`));
-    
+
     if (defaultAction === 'start' || defaultAction === 's') {
       console.log(chalk.cyan('Starting synchronizer...'));
       await start();
@@ -3950,7 +4060,7 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
   } catch (error) {
     console.error(chalk.red('❌ Automatic Enterprise API setup failed:'));
     console.error(chalk.red(error.message));
-    
+
     if (error.message.includes('401') || error.message.includes('Unauthorized')) {
       console.error(chalk.yellow('\n💡 Troubleshooting:'));
       console.error(chalk.gray('• Check that your Enterprise API Key is correct'));
@@ -3961,7 +4071,7 @@ async function setupViaEnterpriseAPIAutomatic(apiKey) {
     } else if (error.message.includes('ENOTFOUND') || error.message.includes('network')) {
       console.error(chalk.yellow('\n💡 Network error. Check your internet connection and try again.'));
     }
-    
+
     process.exit(1);
   }
 }
@@ -3973,7 +4083,7 @@ program.name('synchronize')
   • Docker container management with auto-installation
   • Enterprise API integration for automated synq key provisioning
   • Automated Docker image update monitoring (every 30-60 minutes)
-  • Multi-platform support (Linux/macOS/Windows) 
+  • Multi-platform support (Linux/macOS/Windows)
   • Systemd service generation for headless operation
   • Real-time web dashboard with performance metrics
   • Persistent wallet lifetime points tracking (survives restarts)
@@ -3981,7 +4091,7 @@ program.name('synchronize')
   • Quality of Service (QoS) monitoring
   • Built-in troubleshooting and permission fixes
   • Platform architecture detection (ARM64/AMD64)
-  
+
 🌐 WEB DASHBOARD:
   • Real-time monitoring with performance metrics
   • Custom port configuration (--port and --metrics-port options)
@@ -4023,7 +4133,7 @@ program.name('synchronize')
     synchronize web                # Launch web dashboard (auto ports
     synchronize web --port 8080    # Launch with custom dashboard port
     synchronize web -p 8080 -m 8081 # Custom dashboard and metrics ports
-    
+
     # One-command deployment:
     synchronize deploy -k <synq-key> -w <wallet-address>
     synchronize deploy -k <synq-key> -w <wallet-address> -p 8080 -m 8081
@@ -4213,19 +4323,19 @@ async function deployAll(options) {
     console.log(chalk.cyan('📝 Saving configuration...'));
     const configDir = path.join(os.homedir(), '.synchronizer');
     const configPath = path.join(configDir, 'config.json');
-    
+
     // Ensure config directory exists
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });
     }
-    
+
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
     console.log(chalk.green('✅ Configuration saved successfully'));
 
     // 3. Start the synchronizer container
     console.log(chalk.cyan('🐳 Starting synchronizer container...'));
     await start(); // Use existing start function
-    
+
     // Wait a moment for container to initialize
     console.log(chalk.gray('⏳ Waiting for container initialization...'));
     await new Promise(resolve => setTimeout(resolve, 3000));
