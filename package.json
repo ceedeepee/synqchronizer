@@ -1,6 +1,6 @@
 {
   "name": "synchronizer-cli",
-  "version": "2.2.15",
+  "version": "2.3.9",
   "description": "Complete CLI toolkit for Multisynq Synchronizer - Production release with live wallet points API integration via startsynqing.com, automatic Enterprise API setup via --api option, enhanced Enterprise API integration featuring immediate action selection (Start/Service/Web/Quit), cloud deployment startup script, automated synq key provisioning, completely removed multisynq-org image references, corrected wallet points API integration, intelligent container management for both start and nightly commands, automated reconnection, graceful stop handling, automated image update monitoring, persistent wallet lifetime points tracking, password-protected dashboard, auto-installation, and systemd service generation with built-in troubleshooting",
   "bin": {
     "synchronize": "index.js"
@@ -47,7 +47,9 @@
     "api",
     "startup",
     "deployment",
-    "cloud"
+    "cloud",
+    "websocket",
+    "realtime"
   ],
   "engines": {
     "node": ">=10.0.0"
@@ -64,7 +66,8 @@
     "inquirer": "^7.3.3",
     "express": "^4.18.2",
     "node-fetch": "^2.6.7",
-    "@multisynq/client": "^1.0.2"
+    "@multisynq/client": "^1.0.2",
+    "ws": "^8.13.0"
   },
   "files": [
     "index.js",
