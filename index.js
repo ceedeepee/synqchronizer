@@ -5743,133 +5743,140 @@ async function startPersistentWebSocket() {
   wsConnectionInProgress = true;
 
   try {
-    const wsUrl = `ws://localhost:3333`;
-    console.log(chalk.cyan(`🔌 Creating persistent WebSocket connection to ${wsUrl}`));
+    // Get container name
+    const containerNames = ['synchronizer-cli', 'synchronizer-nightly'];
+    let containerName = null;
     
-    return new Promise((resolve) => {
-      const ws = new WebSocket(wsUrl, {
-        handshakeTimeout: 5000,
-        timeout: 5000
-      });
-      
-      const timeout = setTimeout(() => {
-        ws.terminate();
-        wsConnectionInProgress = false;
-        console.log(chalk.yellow(`⚠️ WebSocket connection timeout to ${wsUrl}`));
-        resolve(false);
-      }, 10000);
-      
-      ws.on('open', () => {
-        clearTimeout(timeout);
-        wsConnectionInProgress = false;
-        containerWebSocket = ws;
+    for (const name of containerNames) {
+      try {
+        const psOutput = execSync(`docker ps --filter name=${name} --format "{{.Names}}"`, {
+          encoding: 'utf8',
+          stdio: 'pipe'
+        }).trim();
         
-        console.log(chalk.green(`🔌 PERSISTENT WebSocket connected successfully`));
+        if (psOutput.includes(name)) {
+          containerName = name;
+          break;
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+
+    if (!containerName) {
+      console.log(chalk.yellow('⚠️ No synchronizer container found for WebSocket connection'));
+      wsConnectionInProgress = false;
+      return false;
+    }
+
+    // Get dynamic WebSocket URLs to try
+    const wsUrls = await getContainerWebSocketUrls(containerName);
+    
+    // Try each URL until one works
+    for (const wsUrl of wsUrls) {
+      console.log(chalk.cyan(`🔌 Trying WebSocket connection to ${wsUrl}...`));
+      
+      // Test the URL first
+      const canConnect = await testWebSocketUrl(wsUrl, 3000);
+      if (!canConnect) {
+        console.log(chalk.gray(`⚠️ Cannot connect to ${wsUrl}, trying next...`));
+        continue;
+      }
+      
+      console.log(chalk.green(`✅ Successfully tested ${wsUrl}, establishing persistent connection...`));
+      
+      return new Promise((resolve) => {
+        const ws = new WebSocket(wsUrl, {
+          handshakeTimeout: 5000,
+          timeout: 5000
+        });
         
-        // Set up message handler for reflector responses
-        ws.on('message', (data) => {
-          try {
-            const message = JSON.parse(data.toString());
-            
-            // Store the latest data with timestamp and merge with previous data
-            // Preserve ratingsBlurbs from previous messages if not present in current message
-            const previousBlurbs = latestContainerData ? latestContainerData.ratingsBlurbs : null;
-            
-            latestContainerData = {
-              ...(latestContainerData || {}), // Keep previous data
-              ...message, // Merge in new data
-              receivedAt: Date.now()
-            };
-            
-            // Handle specific message types
-            if (message.what) {
+        const timeout = setTimeout(() => {
+          ws.terminate();
+          wsConnectionInProgress = false;
+          console.log(chalk.yellow(`⚠️ WebSocket connection timeout to ${wsUrl}`));
+          resolve(false);
+        }, 10000);
+        
+        ws.on('open', () => {
+          clearTimeout(timeout);
+          wsConnectionInProgress = false;
+          containerWebSocket = ws;
+          
+          console.log(chalk.green(`✅ Persistent WebSocket connected to ${wsUrl}`));
+          
+          // Handle incoming messages
+          ws.on('message', (data) => {
+            try {
+              const message = JSON.parse(data.toString());
+              latestContainerData = {
+                ...message,
+                hasWebSocketData: true,
+                receivedAt: Date.now()
+              };
+              
               if (message.what === 'stats' && message.value) {
                 latestContainerData = {
                   ...latestContainerData,
                   ...message.value,
+                  hasWebSocketData: true,
                   receivedAt: Date.now()
                 };
-                
-                // Preserve ratingsBlurbs if not in current message but was in previous
-                if (!latestContainerData.ratingsBlurbs && previousBlurbs) {
-                  latestContainerData.ratingsBlurbs = previousBlurbs;
-                  console.log(chalk.gray('📋 Preserved previous ratingsBlurbs'));
-                }
-              } else if (message.what === 'UPDATE_TALLIES') {
-                if (message.lifePoints !== undefined) {
-                  latestContainerData.syncLifePoints = message.lifePoints;
-                }
-                if (message.lifeTraffic !== undefined) {
-                  latestContainerData.syncLifeTraffic = message.lifeTraffic;
-                }
-                if (message.walletPoints !== undefined) {
-                  latestContainerData.walletLifePoints = message.walletPoints;
-                }
-                if (message.walletBalance !== undefined) {
-                  latestContainerData.walletBalance = message.walletBalance;
-                }
-                
-                // Preserve ratingsBlurbs for UPDATE_TALLIES messages too
-                if (!latestContainerData.ratingsBlurbs && previousBlurbs) {
-                  latestContainerData.ratingsBlurbs = previousBlurbs;
-                }
               }
-            } else {
-              // For direct messages, preserve ratingsBlurbs if not present
-              if (!latestContainerData.ratingsBlurbs && previousBlurbs) {
-                latestContainerData.ratingsBlurbs = previousBlurbs;
-                console.log(chalk.gray('📋 Preserved ratingsBlurbs from previous message'));
-              }
+            } catch (error) {
+              // Ignore parsing errors
             }
-            
-          } catch (error) {
-            // Ignore parsing errors
-          }
-        });
-        
-        // Handle disconnection - but DO NOT reconnect automatically
-        ws.on('close', () => {
-          console.log(chalk.yellow('🔌 PERSISTENT WebSocket disconnected - will use cached data'));
-          containerWebSocket = null;
-          wsConnectionInProgress = false;
-          // DO NOT reset wsInitialized - keep using cached data
+          });
+          
+          // Handle disconnection - but DO NOT reconnect automatically
+          ws.on('close', () => {
+            console.log(chalk.yellow('🔌 PERSISTENT WebSocket disconnected - will use cached data'));
+            containerWebSocket = null;
+            wsConnectionInProgress = false;
+            // DO NOT reset wsInitialized - keep using cached data
+          });
+          
+          ws.on('error', (error) => {
+            console.log(chalk.yellow(`⚠️ PERSISTENT WebSocket error: ${error.message}`));
+            containerWebSocket = null;
+            wsConnectionInProgress = false;
+            // DO NOT reset wsInitialized - keep using cached data
+          });
+          
+          // Send periodic stats requests every 30 seconds to keep data fresh
+          const statsInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ what: 'stats' }));
+              console.log(chalk.gray(`📡 Sent periodic stats request`));
+            } else {
+              clearInterval(statsInterval);
+            }
+          }, 30000);
+          
+          // Send initial stats request
+          setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ what: 'stats' }));
+              console.log(chalk.gray(`📡 Sent initial stats request`));
+            }
+          }, 500);
+          
+          resolve(true);
         });
         
         ws.on('error', (error) => {
-          console.log(chalk.yellow(`⚠️ PERSISTENT WebSocket error: ${error.message}`));
-          containerWebSocket = null;
+          clearTimeout(timeout);
           wsConnectionInProgress = false;
-          // DO NOT reset wsInitialized - keep using cached data
+          console.log(chalk.yellow(`⚠️ PERSISTENT WebSocket connection failed to ${wsUrl}: ${error.message}`));
+          resolve(false);
         });
-        
-        // Send periodic stats requests every 30 seconds to keep data fresh
-        const statsInterval = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ what: 'stats' }));
-            console.log(chalk.gray(`📡 Sent periodic stats request`));
-          } else {
-            clearInterval(statsInterval);
-          }
-        }, 30000);
-        
-        // Send initial stats request
-        setTimeout(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ what: 'stats' }));
-            console.log(chalk.gray(`📡 Sent initial stats request`));
-          }
-        }, 500);
-        
-        resolve(true);
       });
-      
-      ws.on('error', (error) => {
-        clearTimeout(timeout);
-        wsConnectionInProgress = false;
-        console.log(chalk.yellow(`⚠️ PERSISTENT WebSocket connection failed: ${error.message}`));
-        resolve(false);
-      });
-    });
+    }
+    
+    // If we get here, all URLs failed
+    wsConnectionInProgress = false;
+    console.log(chalk.red('❌ All WebSocket connection attempts failed'));
+    return false;
     
   } catch (error) {
     wsConnectionInProgress = false;
@@ -6020,90 +6027,6 @@ async function startReflectorPolling(containerName) {
   }
 }
 
-/**
- * Start WebSocket connection to the container's reflector WebSocket server
- * The reflector runs a WebSocket server on port 9090 (as shown in reflector.js)
- * @param {string} containerName Name of the Docker container
- */
-async function startWebSocketConnection(containerName) {
-  if (containerWebSocket && containerWebSocket.readyState === WebSocket.OPEN) {
-    console.log(chalk.gray('🔌 WebSocket already connected'));
-    return;
-  }
-
-  try {
-    // Connect to the reflector's WebSocket server on port 9090 (from reflector.js line 215)
-    const wsUrl = `ws://localhost:3333`;
-    console.log(chalk.cyan(`🔌 Connecting to reflector WebSocket at ${wsUrl}...`));
-    
-    containerWebSocket = new WebSocket(wsUrl);
-    
-    containerWebSocket.on('open', () => {
-      console.log(chalk.green('🔌 Connected to reflector WebSocket'));
-      
-      // Send initial stats request
-      const statsRequest = { what: 'stats' };
-      containerWebSocket.send(JSON.stringify(statsRequest));
-      console.log(chalk.gray('📡 Sent initial stats request'));
-      
-      // Set up periodic stats requests every 30 seconds
-      const statsInterval = setInterval(() => {
-        if (containerWebSocket && containerWebSocket.readyState === WebSocket.OPEN) {
-          containerWebSocket.send(JSON.stringify({ what: 'stats' }));
-          console.log(chalk.gray('📡 Sent periodic stats request'));
-        } else {
-          clearInterval(statsInterval);
-        }
-      }, 30000);
-    });
-    
-    containerWebSocket.on('message', (data) => {
-      try {
-        const message = JSON.parse(data.toString());
-        
-        // Store the latest data with timestamp
-        latestContainerData = {
-          ...message,
-          receivedAt: Date.now()
-        };
-        
-        // Log the data received for debugging
-        console.log(chalk.cyan(`📨 WebSocket data: ${Object.keys(message).join(', ')}`));
-        
-        // Handle different message types from reflector
-        if (message.what === 'stats' && message.value) {
-          console.dir(message.value, { depth: null });
-          // Merge stats data
-          latestContainerData = {
-            ...latestContainerData,
-            ...message.value,
-            receivedAt: Date.now()
-          };
-          console.dir(latestContainerData, { depth: null });
-          console.log(chalk.green(`✅ Received stats: sessions=${message.value.sessions}, users=${message.value.users}`));
-        }
-        
-      } catch (error) {
-        console.log(chalk.yellow(`⚠️ Error parsing WebSocket message: ${error.message}`));
-      }
-    });
-    
-    containerWebSocket.on('close', (code, reason) => {
-      console.log(chalk.yellow(`🔌 WebSocket disconnected: ${code} ${reason}`));
-      containerWebSocket = null;
-      // Don't automatically reconnect to avoid spam
-    });
-    
-    containerWebSocket.on('error', (error) => {
-      console.log(chalk.red(`❌ WebSocket error: ${error.message}`));
-      containerWebSocket = null;
-    });
-    
-  } catch (error) {
-    console.log(chalk.red(`❌ Failed to connect to WebSocket: ${error.message}`));
-    wsConnectionAttempts++;
-  }
-}
 
 /**
  * Get points data specifically for the synchronize points command
@@ -6202,4 +6125,208 @@ async function getPointsDataForCommand(config) {
     error: 'Unable to fetch points data - external API failed and synchronizer container not running',
     fallback: true
   };
+}
+
+/**
+ * Dynamically detect the correct WebSocket URL for connecting to the Docker container
+ * This tries multiple strategies to handle different Docker network configurations
+ * @param {string} containerName Name of the Docker container
+ * @returns {Promise<string[]>} Array of WebSocket URLs to try in order of preference
+ */
+async function getContainerWebSocketUrls(containerName) {
+  const urls = [];
+  
+  try {
+    // Strategy 1: Get container's actual IP address and internal port
+    try {
+      const inspectOutput = execSync(`docker inspect ${containerName} --format "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"`, {
+        encoding: 'utf8',
+        stdio: 'pipe'
+      }).trim();
+      
+      if (inspectOutput && inspectOutput !== '<no value>') {
+        urls.push(`ws://${inspectOutput}:3333`);
+        console.log(chalk.cyan(`🔍 Found container IP: ${inspectOutput}`));
+      }
+    } catch (error) {
+      console.log(chalk.gray(`⚠️ Could not get container IP: ${error.message}`));
+    }
+    
+    // Strategy 2: Check if port 3333 is mapped to a different host port
+    try {
+      const portOutput = execSync(`docker port ${containerName} 3333`, {
+        encoding: 'utf8',
+        stdio: 'pipe'
+      }).trim();
+      
+      if (portOutput) {
+        // Parse output like "0.0.0.0:3333" or "127.0.0.1:3334"
+        const match = portOutput.match(/([^:]+):(\d+)/);
+        if (match) {
+          const [, host, port] = match;
+          // If it's bound to 0.0.0.0, try localhost with the mapped port
+          if (host === '0.0.0.0') {
+            urls.push(`ws://localhost:${port}`);
+          } else {
+            urls.push(`ws://${host}:${port}`);
+          }
+          console.log(chalk.cyan(`🔍 Found port mapping: ${portOutput}`));
+        }
+      }
+    } catch (error) {
+      console.log(chalk.gray(`⚠️ Could not get port mapping: ${error.message}`));
+    }
+    
+    // Strategy 3: Try localhost:3333 (traditional fallback)
+    urls.push('ws://localhost:3333');
+    
+    // Strategy 4: Try 127.0.0.1:3333 (alternative localhost)
+    urls.push('ws://127.0.0.1:3333');
+    
+  } catch (error) {
+    console.log(chalk.yellow(`⚠️ Error detecting WebSocket URLs: ${error.message}`));
+    // Fallback to default
+    urls.push('ws://localhost:3333');
+  }
+  
+  // Remove duplicates while preserving order
+  const uniqueUrls = [...new Set(urls)];
+  console.log(chalk.blue(`🔍 WebSocket URL candidates: ${uniqueUrls.join(', ')}`));
+  
+  return uniqueUrls;
+}
+
+/**
+ * Test WebSocket connection to a specific URL
+ * @param {string} wsUrl WebSocket URL to test
+ * @param {number} timeout Timeout in milliseconds
+ * @returns {Promise<boolean>} True if connection successful
+ */
+async function testWebSocketUrl(wsUrl, timeout = 5000) {
+  return new Promise((resolve) => {
+    try {
+      const ws = new WebSocket(wsUrl);
+      const timeoutId = setTimeout(() => {
+        ws.terminate();
+        resolve(false);
+      }, timeout);
+      
+      ws.on('open', () => {
+        clearTimeout(timeoutId);
+        ws.close();
+        resolve(true);
+      });
+      
+      ws.on('error', () => {
+        clearTimeout(timeoutId);
+        resolve(false);
+      });
+    } catch (error) {
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * Start WebSocket connection to the container's reflector WebSocket server
+ * The reflector runs a WebSocket server on port 3333 (as shown in wrapper.js)
+ * @param {string} containerName Name of the Docker container
+ */
+async function startWebSocketConnection(containerName) {
+  if (containerWebSocket && containerWebSocket.readyState === WebSocket.OPEN) {
+    console.log(chalk.gray('🔌 WebSocket already connected'));
+    return;
+  }
+
+  try {
+    // Get dynamic WebSocket URLs to try
+    const wsUrls = await getContainerWebSocketUrls(containerName);
+    
+    // Try each URL until one works
+    for (const wsUrl of wsUrls) {
+      console.log(chalk.cyan(`🔌 Connecting to reflector WebSocket at ${wsUrl}...`));
+      
+      // Test the URL first
+      const canConnect = await testWebSocketUrl(wsUrl, 3000);
+      if (!canConnect) {
+        console.log(chalk.gray(`⚠️ Cannot connect to ${wsUrl}, trying next...`));
+        continue;
+      }
+      
+      console.log(chalk.green(`✅ Connection test passed for ${wsUrl}, establishing connection...`));
+      
+      containerWebSocket = new WebSocket(wsUrl);
+      
+      containerWebSocket.on('open', () => {
+        console.log(chalk.green(`🔌 Connected to reflector WebSocket at ${wsUrl}`));
+        
+        // Send initial stats request
+        const statsRequest = { what: 'stats' };
+        containerWebSocket.send(JSON.stringify(statsRequest));
+        console.log(chalk.gray('📡 Sent initial stats request'));
+        
+        // Set up periodic stats requests every 30 seconds
+        const statsInterval = setInterval(() => {
+          if (containerWebSocket && containerWebSocket.readyState === WebSocket.OPEN) {
+            containerWebSocket.send(JSON.stringify({ what: 'stats' }));
+            console.log(chalk.gray('📡 Sent periodic stats request'));
+          } else {
+            clearInterval(statsInterval);
+          }
+        }, 30000);
+      });
+      
+      containerWebSocket.on('message', (data) => {
+        try {
+          const message = JSON.parse(data.toString());
+          
+          // Store the latest data with timestamp
+          latestContainerData = {
+            ...message,
+            receivedAt: Date.now()
+          };
+          
+          // Log the data received for debugging
+          console.log(chalk.cyan(`📨 WebSocket data: ${Object.keys(message).join(', ')}`));
+          
+          // Handle different message types from reflector
+          if (message.what === 'stats' && message.value) {
+            console.dir(message.value, { depth: null });
+            // Merge stats data
+            latestContainerData = {
+              ...latestContainerData,
+              ...message.value,
+              receivedAt: Date.now()
+            };
+            console.dir(latestContainerData, { depth: null });
+            console.log(chalk.green(`✅ Received stats: sessions=${message.value.sessions}, users=${message.value.users}`));
+          }
+          
+        } catch (error) {
+          console.log(chalk.yellow(`⚠️ Error parsing WebSocket message: ${error.message}`));
+        }
+      });
+      
+      containerWebSocket.on('close', (code, reason) => {
+        console.log(chalk.yellow(`🔌 WebSocket disconnected: ${code} ${reason}`));
+        containerWebSocket = null;
+        // Don't automatically reconnect to avoid spam
+      });
+      
+      containerWebSocket.on('error', (error) => {
+        console.log(chalk.red(`❌ WebSocket error: ${error.message}`));
+        containerWebSocket = null;
+      });
+      
+      // Successfully created connection, exit loop
+      return;
+    }
+    
+    // If we get here, all URLs failed
+    console.log(chalk.red('❌ All WebSocket connection attempts failed'));
+    
+  } catch (error) {
+    console.log(chalk.red(`❌ Failed to connect to WebSocket: ${error.message}`));
+    wsConnectionAttempts++;
+  }
 }
