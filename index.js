@@ -2150,56 +2150,138 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP, ve
                     <span class="performance-value">\${data.performance.sessions || '0'}</span>
                 </div>
                 <div class="performance-metric">
-                    <span class="performance-label">Current In Traffic:</span>
-                    <span class="performance-value">\${formatBytes(data.performance.inTraffic || 0)}/s</span>
-                </div>
-                <div class="performance-metric">
-                    <span class="performance-label">Current Out Traffic:</span>
-                    <span class="performance-value">\${formatBytes(data.performance.outTraffic || 0)}/s</span>
-                </div>
-                <div class="performance-metric">
-                    <span class="performance-label">Active Users Now:</span>
+                    <span class="performance-label">Current Users:</span>
                     <span class="performance-value">\${data.performance.users || '0'}</span>
                 </div>
+                <div class="performance-metric">
+                    <span class="performance-label">Demo Sessions:</span>
+                    <span class="performance-value">\${data.performance.demoSessions || '0'}</span>
+                </div>
+                <div class="performance-metric">
+                    <span class="performance-label">Bytes In:</span>
+                    <span class="performance-value">\${formatBytes(data.performance.bytesIn || 0)}</span>
+                </div>
+                <div class="performance-metric">
+                    <span class="performance-label">Bytes Out:</span>
+                    <span class="performance-value">\${formatBytes(data.performance.bytesOut || 0)}</span>
+                </div>
+                \${data.performance.proxyConnectionState ? \`
+                <div class="performance-metric">
+                    <span class="performance-label">Connection State:</span>
+                    <span class="performance-value" style="color: \${data.performance.proxyConnectionState === 'CONNECTED' ? '#4ade80' : '#fbbf24'}">\${data.performance.proxyConnectionState}</span>
+                </div>
+                \` : ''}
             \`;
             
-            // QoS display
+            // QoS display with new rating system conversion
             const qos = data.qos || {};
-            const score = qos.score || 0;
+            
+            // Convert 0/1/2 rating values to percentage values for display
+            // 0 = 100%, 1 = 67%, 2 = 33%
+            const convertRatingToPercentage = (rating) => {
+                if (rating === 0) return 100;
+                if (rating === 1) return 67;
+                if (rating === 2) return 33;
+                return 0; // fallback for undefined/null
+            };
+            
+            // Get the raw rating values (0, 1, or 2)
+            const availabilityRating = qos.availability !== undefined ? qos.availability : 2;
+            const reliabilityRating = qos.reliability !== undefined ? qos.reliability : 2;
+            const efficiencyRating = qos.efficiency !== undefined ? qos.efficiency : 2;
+            
+            // Convert to percentages for display
+            const availability = convertRatingToPercentage(availabilityRating);
+            const reliability = convertRatingToPercentage(reliabilityRating);
+            const efficiency = convertRatingToPercentage(efficiencyRating);
+            
+            // Calculate overall health score using new formula:
+            // 40% base + 10% for every amount under 2
+            const score = 40 + 10 * ((2 - availabilityRating) + (2 - reliabilityRating) + (2 - efficiencyRating));
             
             let qosClass = 'qos-poor';
-            let statusClass = 'status-poor';
-            let statusText = 'Poor';
-            
             if (score >= 80) {
                 qosClass = 'qos-excellent';
-                statusClass = 'status-excellent';
-                statusText = 'Excellent';
-            } else if (score >= 40) {
+            } else if (score >= 60) {
                 qosClass = 'qos-good';
-                statusClass = 'status-good';
-                statusText = 'Good';
             }
+            
+            // Parse ratingsBlurbs if available
+            let ratingsBlurbs = null;
+            if (qos.ratingsBlurbs) {
+                try {
+                    if (typeof qos.ratingsBlurbs === 'string') {
+                        ratingsBlurbs = JSON.parse(qos.ratingsBlurbs);
+                    } else if (typeof qos.ratingsBlurbs === 'object') {
+                        ratingsBlurbs = qos.ratingsBlurbs;
+                    }
+                } catch (e) {
+                    console.log('Error parsing ratingsBlurbs:', e);
+                    // If JSON parsing fails, treat as plain text
+                    ratingsBlurbs = { general: String(qos.ratingsBlurbs) };
+                }
+            }
+            
+            console.log('ratingsBlurbs processed:', ratingsBlurbs); // Debug log
             
             const qosHtml = \`
                 <div class="qos-score">
                     <div class="qos-circle \${qosClass}">
                         \${score}%
                     </div>
-                    <div style="opacity: 0.8;">Health Score</div>
+                    <div style="opacity: 0.8;">Overall Health Score</div>
                 </div>
                 <div class="qos-status">
-                    <span><span class="qos-indicator \${qos.reliability >= 80 ? 'status-excellent' : qos.reliability >= 40 ? 'status-good' : 'status-poor'}"></span>Reliability</span>
-                    <span>\${qos.reliability}%</span>
+                    <span><span class="qos-indicator \${reliability >= 80 ? 'status-excellent' : reliability >= 60 ? 'status-good' : 'status-poor'}"></span>Reliability</span>
+                    <span style="font-weight: bold;">\${reliability}%</span>
                 </div>
+                \${ratingsBlurbs && ratingsBlurbs.reliability ? \`
+                <div style="margin: 5px 0 10px 20px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; font-size: 0.8em; opacity: 0.8; line-height: 1.3;">
+                    \${ratingsBlurbs.reliability.replace(/\\n/g, '<br>')}
+                </div>
+                \` : ''}
+                
                 <div class="qos-status">
-                    <span><span class="qos-indicator \${qos.availability >= 80 ? 'status-excellent' : qos.availability >= 40 ? 'status-good' : 'status-poor'}"></span>Availability</span>
-                    <span>\${qos.availability}%</span>
+                    <span><span class="qos-indicator \${availability >= 80 ? 'status-excellent' : availability >= 60 ? 'status-good' : 'status-poor'}"></span>Availability</span>
+                    <span style="font-weight: bold;">\${availability}%</span>
                 </div>
+                \${ratingsBlurbs && ratingsBlurbs.availability ? \`
+                <div style="margin: 5px 0 10px 20px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; font-size: 0.8em; opacity: 0.8; line-height: 1.3;">
+                    \${ratingsBlurbs.availability.replace(/\\n/g, '<br>')}
+                </div>
+                \` : ''}
+                
                 <div class="qos-status">
-                    <span><span class="qos-indicator \${qos.efficiency >= 80 ? 'status-excellent' : qos.efficiency >= 40 ? 'status-good' : 'status-poor'}"></span>Efficiency</span>
-                    <span>\${qos.efficiency}%</span>
+                    <span><span class="qos-indicator \${efficiency >= 80 ? 'status-excellent' : efficiency >= 60 ? 'status-good' : 'status-poor'}"></span>Efficiency</span>
+                    <span style="font-weight: bold;">\${efficiency}%</span>
                 </div>
+                \${ratingsBlurbs && ratingsBlurbs.efficiency ? \`
+                <div style="margin: 5px 0 10px 20px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; font-size: 0.8em; opacity: 0.8; line-height: 1.3;">
+                    \${ratingsBlurbs.efficiency.replace(/\\n/g, '<br>')}
+                </div>
+                \` : ''}
+                
+                \${ratingsBlurbs && (ratingsBlurbs.general || ratingsBlurbs.overall) ? \`
+                <div style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.08); border-radius: 6px; border-left: 3px solid #fbbf24;">
+                    <div style="font-size: 0.9em; font-weight: bold; margin-bottom: 8px; opacity: 0.9;">📝 Overall Assessment:</div>
+                    <div style="font-size: 0.8em; opacity: 0.8; line-height: 1.4;">\${(ratingsBlurbs.general || ratingsBlurbs.overall).replace(/\\n/g, '<br>')}</div>
+                </div>
+                \` : ''}
+                
+                \${ratingsBlurbs ? \`
+                <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 4px; border-left: 2px solid #60a5fa;">
+                    <div style="font-size: 0.8em; font-weight: bold; margin-bottom: 6px; opacity: 0.8; color: #60a5fa;">📊 Quality Insights:</div>
+                    <div style="font-size: 0.7em; opacity: 0.7; line-height: 1.3;">
+                        Real-time quality assessments from the synchronizer network.
+                    </div>
+                </div>
+                \` : \`
+                <div style="margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 4px; border-left: 2px solid #6b7280;">
+                    <div style="font-size: 0.7em; opacity: 0.6; line-height: 1.3;">
+                        Quality insights will appear here when synchronizer data is available.
+                    </div>
+                </div>
+                \`}
             \`;
             
             document.getElementById('performance-content').innerHTML = performanceHtml;
@@ -2221,42 +2303,67 @@ function generateDashboardHTML(config, metricsPort, authenticated, primaryIP, ve
                 return;
             }
             
-            const pointsHtml = \`
-                <div class="points-display">
-                    <div class="points-total">
-                        <div class="points-number">\${totalPoints.toLocaleString()}</div>
-                        <div class="points-label">Total Points</div>
-                        \${data.source === 'multisynq_api' ? '<div style="opacity: 0.6; font-size: 0.7em; color: #4ade80;">🔗 Live from Multisynq API</div>' : ''}
-                        \${data.source === 'registry_api' ? '<div style="opacity: 0.6; font-size: 0.7em; color: #4ade80;">🔗 Live from Registry</div>' : ''}
-                        \${data.source === 'container_stats' ? '<div style="opacity: 0.6; font-size: 0.7em; color: #4ade80;">🐳 Live from Container</div>' : ''}
+            // Show different types of points separately if available
+            const syncLifePoints = data.syncLifePoints !== undefined ? data.syncLifePoints : null;
+            const walletLifePoints = data.walletLifePoints !== undefined ? data.walletLifePoints : null;
+            const walletBalance = data.walletBalance !== undefined ? data.walletBalance : null;
+            
+            let pointsMainDisplay = '';
+            
+            if (syncLifePoints !== null || walletLifePoints !== null) {
+                // Show separate sync and wallet points
+                pointsMainDisplay = \`
+                    <div class="points-display" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+                        \${syncLifePoints !== null ? \`
+                        <div class="points-total">
+                            <div class="points-number" style="color: #60a5fa;">\${syncLifePoints.toLocaleString()}</div>
+                            <div class="points-label">Sync Life Points</div>
+                            <div style="opacity: 0.6; font-size: 0.7em; color: #60a5fa;">🔄 Service Credits</div>
+                        </div>
+                        \` : ''}
+                        \${walletLifePoints !== null ? \`
+                        <div class="points-total">
+                            <div class="points-number" style="color: #34d399;">\${walletLifePoints.toLocaleString()}</div>
+                            <div class="points-label">Wallet Life Points</div>
+                            <div style="opacity: 0.6; font-size: 0.7em; color: #34d399;">💰 Earnings</div>
+                        </div>
+                        \` : ''}
+                        \${walletBalance !== null ? \`
+                        <div class="points-total">
+                            <div class="points-number" style="color: #fbbf24;">\${walletBalance.toLocaleString()}</div>
+                            <div class="points-label">Wallet Balance</div>
+                            <div style="opacity: 0.6; font-size: 0.7em; color: #fbbf24;">🏦 Current Balance</div>
+                        </div>
+                        \` : ''}
                     </div>
-                </div>
+                \`;
+            } else {
+                // Fallback to total points display
+                pointsMainDisplay = \`
+                    <div class="points-display">
+                        <div class="points-total">
+                            <div class="points-number">\${totalPoints.toLocaleString()}</div>
+                            <div class="points-label">Total Points</div>
+                            \${data.source === 'websocket_priority' ? '<div style="opacity: 0.6; font-size: 0.7em; color: #4ade80;">🔌 Live WebSocket Data</div>' : ''}
+                            \${data.source === 'container_stats' ? '<div style="opacity: 0.6; font-size: 0.7em; color: #4ade80;">🐳 Live from Container</div>' : ''}
+                            \${data.source === 'api' ? '<div style="opacity: 0.6; font-size: 0.7em; color: #4ade80;">🔗 Live from API</div>' : ''}
+                        </div>
+                    </div>
+                \`;
+            }
+            
+            const pointsHtml = pointsMainDisplay + \`
                 <div class="points-breakdown">
-                    <div class="points-item">
-                        <div class="points-item-value">\${(points.daily || 0).toLocaleString()}</div>
-                        <div class="points-item-label">Today</div>
-                    </div>
-                    <div class="points-item">
-                        <div class="points-item-value">\${(points.weekly || 0).toLocaleString()}</div>
-                        <div class="points-item-label">This Week</div>
-                    </div>
-                    <div class="points-item">
-                        <div class="points-item-value">\${(points.monthly || 0).toLocaleString()}</div>
-                        <div class="points-item-label">This Month</div>
-                    </div>
-                    <div class="points-item">
-                        <div class="points-item-value">\${(points.streak || 0)}</div>
-                        <div class="points-item-label">Day Streak</div>
-                    </div>
-                    <div class="points-item">
-                        <div class="points-item-value">\${(points.rank || 'N/A')}</div>
-                        <div class="points-item-label">Global Rank</div>
-                    </div>
-                    <div class="points-item">
-                        <div class="points-item-value">\${(points.multiplier || '1.0')}x</div>
-                        <div class="points-item-label">Multiplier</div>
-                    </div>
+                    
                 </div>
+                \${data.isEarning !== undefined ? \`
+                <div style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 6px; text-align: center;">
+                    <span style="color: \${data.isEarning ? '#4ade80' : '#fbbf24'}; font-weight: bold;">
+                        \${data.isEarning ? '✅ Currently Earning' : '⚠️ Not Currently Earning'}
+                    </span>
+                    \${data.connectionState ? \`<span style="opacity: 0.8; margin-left: 10px;">• \${data.connectionState}</span>\` : ''}
+                </div>
+                \` : ''}
             \`;
             
             document.getElementById('points-content').innerHTML = pointsHtml;
@@ -2637,31 +2744,49 @@ async function getPerformanceData(config) {
   // PRIORITY 1: Check if we have fresh WebSocket data that overrides cache
   const containerStats = await getContainerStats();
   if (containerStats && containerStats.hasWebSocketData) {
+    console.log(chalk.cyan(`🔍 Container stats ratingsBlurbs check:`));
+    console.log(chalk.cyan(`   Type: ${typeof containerStats.ratingsBlurbs}`));
+    console.log(chalk.cyan(`   Value: ${containerStats.ratingsBlurbs ? 'PRESENT' : 'NULL'}`));
+    if (containerStats.ratingsBlurbs) {
+      console.log(chalk.cyan(`   Content sample: ${JSON.stringify(containerStats.ratingsBlurbs).substring(0, 100)}...`));
+    }
+    
     // We have fresh WebSocket data - use it immediately, ignore cache
     let performance = {
       totalTraffic: containerStats.syncLifeTraffic || (containerStats.bytesIn + containerStats.bytesOut) || 0,
       sessions: containerStats.sessions || 0,
-      inTraffic: containerStats.bytesInDelta || 0,
-      outTraffic: containerStats.bytesOutDelta || 0,
-      users: containerStats.users || 0
+      users: containerStats.users || 0,
+      demoSessions: containerStats.demoSessions || 0,
+      bytesIn: containerStats.bytesIn || 0,
+      bytesOut: containerStats.bytesOut || 0,
+      proxyConnectionState: containerStats.proxyConnectionState || 'UNKNOWN'
     };
     
-    // Calculate QoS based on actual synchronizer health and real data
-    const availability = containerStats.proxyConnectionState === 'CONNECTED' ? 95 : 20;
-    const reliability = containerStats.isEarningPoints ? 
-      (containerStats.syncLifePoints > 0 ? 95 : 85) : 40;
-    const efficiency = containerStats.isEarningPoints ? 90 : 
-      (containerStats.proxyConnectionState === 'CONNECTED' ? 60 : 20);
+    // Use actual QoS values from WebSocket data
+    const availability = containerStats.availability !== undefined ? containerStats.availability : 0;
+    const reliability = containerStats.reliability !== undefined ? containerStats.reliability : 0;
+    const efficiency = containerStats.efficiency !== undefined ? containerStats.efficiency : 0;
     
-    // Give bonus points for having real lifetime points
-    const realDataBonus = containerStats.syncLifePoints > 0 ? 5 : 0;
+    // Calculate overall score from the three QoS metrics
+    const score = Math.floor((availability + reliability + efficiency) / 3);
     
     let qos = {
-      score: Math.min(95, Math.floor((availability + reliability + efficiency) / 3) + realDataBonus),
+      score: score,
       reliability: reliability,
       availability: availability,
-      efficiency: efficiency
+      efficiency: efficiency,
+      ratingsBlurbs: containerStats.ratingsBlurbs || null
     };
+
+    console.log(chalk.blue(`🔍 Sending QoS data to frontend:`));
+    console.log(chalk.blue(`   QoS score: ${score}%, Ratings: ${availability}/${reliability}/${efficiency}`));
+    if (qos.ratingsBlurbs) {
+      console.log(chalk.blue(`   Ratings Blurbs: PRESENT for frontend`));
+      console.log(chalk.cyan(`   Blurbs type: ${typeof qos.ratingsBlurbs}, keys: ${Object.keys(qos.ratingsBlurbs || {}).join(', ')}`));
+    } else {
+      console.log(chalk.yellow(`   Ratings Blurbs: NULL for frontend`));
+      console.log(chalk.gray(`   Container ratingsBlurbs: ${containerStats.ratingsBlurbs ? 'PRESENT in container' : 'NULL in container'}`));
+    }
 
     const result = {
       timestamp: new Date().toISOString(),
@@ -2696,16 +2821,19 @@ async function getPerformanceData(config) {
   let performance = {
     totalTraffic: 0,
     sessions: 0,
-    inTraffic: 0,
-    outTraffic: 0,
-    users: 0
+    users: 0,
+    demoSessions: 0,
+    bytesIn: 0,
+    bytesOut: 0,
+    proxyConnectionState: 'UNKNOWN'
   };
   
   let qos = {
     score: 0,
     reliability: 0,
     availability: 0, 
-    efficiency: 0
+    efficiency: 0,
+    ratingsBlurbs: null
   };
   
   if (isRunning && containerStats) {
@@ -2715,25 +2843,31 @@ async function getPerformanceData(config) {
       performance = {
         totalTraffic: containerStats.syncLifeTraffic || (containerStats.bytesIn + containerStats.bytesOut) || 0,
         sessions: containerStats.sessions || 0,
-        inTraffic: containerStats.bytesInDelta || 0,
-        outTraffic: containerStats.bytesOutDelta || 0,
-        users: containerStats.users || 0
+        users: containerStats.users || 0,
+        demoSessions: containerStats.demoSessions || 0,
+        bytesIn: containerStats.bytesIn || 0,
+        bytesOut: containerStats.bytesOut || 0,
+        proxyConnectionState: containerStats.proxyConnectionState || 'UNKNOWN'
       };
       
-      // Calculate QoS based on actual synchronizer health
-      const availability = containerStats.proxyConnectionState === 'CONNECTED' ? 95 : 20;
-      const reliability = containerStats.isEarningPoints ? 
-        (containerStats.syncLifePoints > 0 ? 95 : 85) : 40;
-      const efficiency = containerStats.isEarningPoints ? 90 : 
-        (containerStats.proxyConnectionState === 'CONNECTED' ? 60 : 20);
+      // Use actual QoS values if available, otherwise calculate based on status
+      const availability = containerStats.availability !== undefined ? 
+        containerStats.availability : (containerStats.proxyConnectionState === 'CONNECTED' ? 95 : 20);
+      const reliability = containerStats.reliability !== undefined ? 
+        containerStats.reliability : (containerStats.isEarningPoints ? 
+          (containerStats.syncLifePoints > 0 ? 95 : 85) : 40);
+      const efficiency = containerStats.efficiency !== undefined ? 
+        containerStats.efficiency : (containerStats.isEarningPoints ? 90 : 
+          (containerStats.proxyConnectionState === 'CONNECTED' ? 60 : 20));
       
-      const realDataBonus = containerStats.syncLifePoints > 0 ? 5 : 0;
+      const score = Math.floor((availability + reliability + efficiency) / 3);
       
       qos = {
-        score: Math.min(95, Math.floor((availability + reliability + efficiency) / 3) + realDataBonus),
+        score: score,
         reliability: reliability,
         availability: availability,
-        efficiency: efficiency
+        efficiency: efficiency,
+        ratingsBlurbs: containerStats.ratingsBlurbs || null
       };
     } else {
       // Container running but no real stats available
@@ -2744,25 +2878,29 @@ async function getPerformanceData(config) {
       performance = {
         totalTraffic: estimatedTraffic,
         sessions: 0,
-        inTraffic: 0,
-        outTraffic: 0,
-        users: 0
+        users: 0,
+        demoSessions: 0,
+        bytesIn: 0,
+        bytesOut: 0,
+        proxyConnectionState: 'UNKNOWN'
       };
       
       qos = {
         score: 50, // Neutral score for running but unconnected
         reliability: 60,
         availability: 50,
-        efficiency: 50
+        efficiency: 50,
+        ratingsBlurbs: null
       };
     }
   } else if (isRunning) {
     // Container reported as running but no stats
     qos = {
       score: 25,
-      reliability: 30,
-      availability: 20,
-      efficiency: 25
+      reliability: 1,
+      availability: 2,
+      efficiency: 1,
+      ratingsBlurbs: null
     };
   } else {
     // Not running - show poor but not zero stats
@@ -2770,7 +2908,8 @@ async function getPerformanceData(config) {
       score: 5,
       reliability: 10,
       availability: 0,
-      efficiency: 5
+      efficiency: 5,
+      ratingsBlurbs: null
     };
   }
 
@@ -2818,22 +2957,28 @@ async function getPointsData(config) {
 
   // PRIORITY 1: Check if we have fresh WebSocket data that overrides cache
   const containerStats = await getContainerStats();
-  if (containerStats && containerStats.hasWebSocketData && containerStats.walletLifePoints > 0) {
-    // We have fresh WebSocket data with real points - use it immediately, ignore cache
+  if (containerStats && containerStats.hasWebSocketData) {
+    // We have fresh WebSocket data - use it immediately, ignore cache
     const walletLifePoints = containerStats.walletLifePoints || 0;
+    const syncLifePoints = containerStats.syncLifePoints || 0;
+    const walletBalance = containerStats.walletBalance || 0;
     const currentPoints = containerStats.isEarningPoints ? Math.floor(containerStats.uptimeHours || 0) : 0;
     
     const result = {
       timestamp: new Date().toISOString(),
       points: {
-        total: walletLifePoints, // Real WebSocket data
-        daily: currentPoints,
-        weekly: Math.floor(walletLifePoints * 0.1),
-        monthly: Math.floor(walletLifePoints * 0.3),
-        streak: walletLifePoints > 100 ? Math.floor(Math.random() * 7) + 1 : 0,
-        rank: walletLifePoints > 1000 ? Math.floor(Math.random() * 10000) + 1 : 'N/A',
-        multiplier: containerStats.isEarningPoints ? '1.0' : '0.0'
+        total: walletLifePoints + syncLifePoints, // Combined for compatibility
+        daily: 0, // Not tracked by CLI
+        weekly: 0, // Not tracked by CLI
+        monthly: 0, // Not tracked by CLI
+        streak: 0, // Not tracked by CLI
+        rank: 'N/A', // Not tracked by CLI
+        multiplier: 'N/A' // Not tracked by CLI
       },
+      // Add separate fields for different point types
+      syncLifePoints: syncLifePoints,
+      walletLifePoints: walletLifePoints,
+      walletBalance: walletBalance,
       source: 'websocket_priority', // Data comes from WebSocket (priority)
       containerUptime: `${(containerStats.uptimeHours || 0).toFixed(1)} hours`,
       isEarning: containerStats.isEarningPoints,
@@ -2874,13 +3019,17 @@ async function getPointsData(config) {
           timestamp: new Date().toISOString(),
           points: {
             total: walletLifePoints,
-            daily: data.dailyPoints || 0,
-            weekly: data.weeklyPoints || 0,
-            monthly: data.monthlyPoints || 0,
-            streak: data.streak || 0,
-            rank: data.rank || 'N/A',
-            multiplier: data.multiplier || '1.0'
+            daily: data.dailyPoints || 0, // Use API data if available
+            weekly: data.weeklyPoints || 0, // Use API data if available  
+            monthly: data.monthlyPoints || 0, // Use API data if available
+            streak: data.streak || 0, // Use API data if available
+            rank: data.rank || 'N/A', // Use API data if available
+            multiplier: data.multiplier || 'N/A' // Use API data if available
           },
+          // Add separate fields (may not be available from API)
+          syncLifePoints: null,
+          walletLifePoints: walletLifePoints,
+          walletBalance: null,
           source: 'api',
           apiExtras: {
             lastWithdrawn: data.lastWithdrawn,
@@ -2907,19 +3056,25 @@ async function getPointsData(config) {
   // PRIORITY 5: Use container stats (if not already used in priority 1)
   if (containerStats) {
     const walletLifePoints = containerStats.walletLifePoints || 0;
+    const syncLifePoints = containerStats.syncLifePoints || 0;
+    const walletBalance = containerStats.walletBalance || 0;
     const currentPoints = containerStats.isEarningPoints ? Math.floor(containerStats.uptimeHours || 0) : 0;
     
     const result = {
       timestamp: new Date().toISOString(),
       points: {
-        total: walletLifePoints,
-        daily: currentPoints,
-        weekly: Math.floor(walletLifePoints * 0.1),
-        monthly: Math.floor(walletLifePoints * 0.3),
-        streak: walletLifePoints > 100 ? Math.floor(Math.random() * 7) + 1 : 0,
-        rank: walletLifePoints > 1000 ? Math.floor(Math.random() * 10000) + 1 : 'N/A',
-        multiplier: containerStats.isEarningPoints ? '1.0' : '0.0'
+        total: walletLifePoints + syncLifePoints,
+        daily: 0, // Not tracked by CLI
+        weekly: 0, // Not tracked by CLI
+        monthly: 0, // Not tracked by CLI
+        streak: 0, // Not tracked by CLI
+        rank: 'N/A', // Not tracked by CLI
+        multiplier: 'N/A' // Not tracked by CLI
       },
+      // Add separate fields for different point types
+      syncLifePoints: syncLifePoints,
+      walletLifePoints: walletLifePoints,
+      walletBalance: walletBalance,
       source: 'container_stats',
       containerUptime: `${(containerStats.uptimeHours || 0).toFixed(1)} hours`,
       isEarning: containerStats.isEarningPoints,
@@ -2947,6 +3102,10 @@ async function getPointsData(config) {
       rank: 'N/A',
       multiplier: '1.0'
     },
+    // Add null separate fields
+    syncLifePoints: null,
+    walletLifePoints: null,
+    walletBalance: null,
     error: 'Synchronizer container not running - start it first',
     fallback: true
   };
@@ -4263,7 +4422,7 @@ async function getContainerStats() {
         if (realtimeData) {
           // Use real-time WebSocket data (most accurate)
           console.log(chalk.green('✅ Using fresh WebSocket data'));
-          realStats = parseReflectorStats(realtimeData);
+          realStats = parseReflectorStats(realtimeData, latestContainerData);
           isEarningPoints = realStats ? realStats.isEarning : false;
           
         } else {
@@ -4314,9 +4473,11 @@ async function getContainerStats() {
             syncLifePointsDelta: realStats.syncLifePointsDelta || 0,
             syncLifeTraffic: realStats.syncLifeTraffic || (realStats.bytesIn + realStats.bytesOut) || 0,
             walletLifePoints: realStats.walletLifePoints || 0,
+            walletBalance: realStats.walletBalance || 0,
             availability: realStats.availability !== undefined ? realStats.availability : 2,
             reliability: realStats.reliability !== undefined ? realStats.reliability : 2,
             efficiency: realStats.efficiency !== undefined ? realStats.efficiency : 2,
+            ratingsBlurbs: realStats.ratingsBlurbs || null,
             proxyConnectionState: realStats.proxyConnectionState || 'UNKNOWN',
             now: Date.now(),
             uptimeHours: uptimeHours,
@@ -4329,6 +4490,10 @@ async function getContainerStats() {
           };
           
           console.log(chalk.green(`✅ Fresh stats retrieved: ${result.dataSource}, Points: ${result.walletLifePoints}, Traffic: ${result.syncLifeTraffic}`));
+          console.log(chalk.cyan(`🔍 Result ratingsBlurbs: ${result.ratingsBlurbs ? 'PRESENT' : 'NULL'}`));
+          if (result.ratingsBlurbs) {
+            console.log(chalk.cyan(`   Blurbs keys: ${Object.keys(result.ratingsBlurbs).join(', ')}`));
+          }
         } else {
           console.log(chalk.red('❌ No stats data available from any source'));
         }
@@ -4816,9 +4981,10 @@ function getLatestContainerData() {
 /**
  * Parse stats data received from the reflector via WebSocket
  * @param {object} data Raw data from reflector WebSocket
+ * @param {object} existingData Previous data to preserve certain fields from
  * @returns {object|null} Parsed stats or null if data is invalid
  */
-function parseReflectorStats(data) {
+function parseReflectorStats(data, existingData = null) {
   if (!data || typeof data !== 'object') {
     return null;
   }
@@ -4843,7 +5009,7 @@ function parseReflectorStats(data) {
       // Handle direct stats objects (not wrapped)
       console.log(chalk.cyan(`🔍 Parsing direct stats object with ${Object.keys(statsData).length} fields`));
     }
-    
+    console.dir(statsData, { depth: null });
     // Log all available fields for debugging
     console.log(chalk.gray(`Available fields: ${Object.keys(statsData).join(', ')}`));
     
@@ -4875,7 +5041,9 @@ function parseReflectorStats(data) {
       // Timing and metadata
       now: statsData.now || Date.now(),
       ratingsTimepoint: statsData.ratingsTimepoint,
-      ratingsBlurbs: statsData.ratingsBlurbs,
+      
+      // Handle ratingsBlurbs with persistence
+      ratingsBlurbs: statsData.ratingsBlurbs || (existingData ? existingData.ratingsBlurbs : null),
       
       // Additional fields that might be available
       numApps: statsData.numApps || 0, // Running apps/utilities
@@ -4912,7 +5080,10 @@ function parseReflectorStats(data) {
     console.log(chalk.green(`   Sync Life Points: ${stats.syncLifePoints}, Traffic: ${stats.syncLifeTraffic}`));
     console.log(chalk.green(`   Wallet Points: ${stats.walletLifePoints}, Balance: ${stats.walletBalance}`));
     console.log(chalk.green(`   Connection: ${stats.proxyConnectionState}, Earning: ${stats.isEarning}`));
-    console.log(chalk.green(`   Bytes In/Out: ${stats.bytesIn}/${stats.bytesOut}`));
+    console.log(chalk.green(`   QoS Ratings: Avail=${stats.availability}, Rel=${stats.reliability}, Eff=${stats.efficiency}`));
+    if (stats.ratingsBlurbs) {
+      console.log(chalk.green(`   Ratings Blurbs: PRESENT`));
+    }
     
     return stats;
   } catch (error) {
@@ -5676,6 +5847,9 @@ async function startPersistentWebSocket() {
             const message = JSON.parse(data.toString());
             
             // Store the latest data with timestamp and merge with previous data
+            // Preserve ratingsBlurbs from previous messages if not present in current message
+            const previousBlurbs = latestContainerData ? latestContainerData.ratingsBlurbs : null;
+            
             latestContainerData = {
               ...(latestContainerData || {}), // Keep previous data
               ...message, // Merge in new data
@@ -5690,6 +5864,12 @@ async function startPersistentWebSocket() {
                   ...message.value,
                   receivedAt: Date.now()
                 };
+                
+                // Preserve ratingsBlurbs if not in current message but was in previous
+                if (!latestContainerData.ratingsBlurbs && previousBlurbs) {
+                  latestContainerData.ratingsBlurbs = previousBlurbs;
+                  console.log(chalk.gray('📋 Preserved previous ratingsBlurbs'));
+                }
               } else if (message.what === 'UPDATE_TALLIES') {
                 if (message.lifePoints !== undefined) {
                   latestContainerData.syncLifePoints = message.lifePoints;
@@ -5703,6 +5883,17 @@ async function startPersistentWebSocket() {
                 if (message.walletBalance !== undefined) {
                   latestContainerData.walletBalance = message.walletBalance;
                 }
+                
+                // Preserve ratingsBlurbs for UPDATE_TALLIES messages too
+                if (!latestContainerData.ratingsBlurbs && previousBlurbs) {
+                  latestContainerData.ratingsBlurbs = previousBlurbs;
+                }
+              }
+            } else {
+              // For direct messages, preserve ratingsBlurbs if not present
+              if (!latestContainerData.ratingsBlurbs && previousBlurbs) {
+                latestContainerData.ratingsBlurbs = previousBlurbs;
+                console.log(chalk.gray('📋 Preserved ratingsBlurbs from previous message'));
               }
             }
             
@@ -5956,12 +6147,14 @@ async function startWebSocketConnection(containerName) {
         
         // Handle different message types from reflector
         if (message.what === 'stats' && message.value) {
+          console.dir(message.value, { depth: null });
           // Merge stats data
           latestContainerData = {
             ...latestContainerData,
             ...message.value,
             receivedAt: Date.now()
           };
+          console.dir(latestContainerData, { depth: null });
           console.log(chalk.green(`✅ Received stats: sessions=${message.value.sessions}, users=${message.value.users}`));
         }
         
