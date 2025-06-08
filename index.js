@@ -4428,7 +4428,7 @@ async function getContainerStats() {
         } else {
           // No WebSocket data available, try HTTP metrics endpoint
           console.log(chalk.yellow('⚠️ No WebSocket data, trying HTTP metrics'));
-          const httpStats = await getStatsFromReflectorHTTP(containerName);
+          // const httpStats = await getStatsFromReflectorHTTP(containerName);
           
           if (httpStats) {
             // Use HTTP metrics data
@@ -4533,7 +4533,7 @@ async function showPoints() {
   }
 
   try {
-    const pointsData = await getPointsData(config);
+    const pointsData = await getPointsDataForCommand(config);
     const containerStats = await getContainerStats();
     
     console.log(chalk.cyan(`🔗 Wallet: ${config.wallet}`));
@@ -4545,21 +4545,16 @@ async function showPoints() {
     if (pointsData.error) {
       console.log(chalk.red(`❌ Error: ${pointsData.error}`));
       if (pointsData.fallback) {
-        console.log(chalk.yellow('📊 Using fallback data (container not running)'));
+        console.log(chalk.yellow('📊 Using fallback data'));
       }
     } else {
       console.log(chalk.green('✅ Points data retrieved successfully'));
       
-      // Show the data source (API is more accurate than container stats)
-      if (pointsData.source === 'api') {
-        console.log(chalk.green('🔗 Using real data from wallet API (most accurate)'));
+      // Show the data source
+      if (pointsData.source === 'external_api') {
+        console.log(chalk.green('🌐 Using real data from external API (most accurate)'));
       } else if (pointsData.source === 'container_stats') {
         console.log(chalk.cyan('🐳 Using data from container stats'));
-        if (containerStats && !containerStats.hasRealStats) {
-          console.log(chalk.yellow('⚠️  Container is running but wallet points not found in logs'));
-          console.log(chalk.gray('   The synchronizer may still be connecting to the registry'));
-          console.log(chalk.gray('   Wait a few moments and try again'));
-        }
       } else {
         console.log(chalk.yellow('📊 Using calculated stats based on container uptime'));
       }
@@ -4578,22 +4573,23 @@ async function showPoints() {
     console.log(chalk.magenta(`🏆 Rank:            ${chalk.bold(points.rank)}`));
     console.log(chalk.cyan(`⚡ Multiplier:      ${chalk.bold(points.multiplier)}x`));
     
-    // Display API-specific details if available
-    if (pointsData.source === 'api' && pointsData.apiExtras) {
+    // Display external API specific details if available
+    if (pointsData.source === 'external_api') {
       console.log('');
-      console.log(chalk.bold('🌟 API DETAILS:'));
+      console.log(chalk.bold('🌐 EXTERNAL API DETAILS:'));
       console.log('');
       
-      if (pointsData.apiExtras.lastWithdrawn !== undefined) {
-        console.log(chalk.blue(`💸 Last Withdrawn:  ${chalk.bold(pointsData.apiExtras.lastWithdrawn.toLocaleString())} points`));
+      if (pointsData.serviceCredits !== undefined) {
+        console.log(chalk.blue(`💰 Service Credits: ${chalk.bold(pointsData.serviceCredits.toLocaleString())}`));
       }
       
-      if (pointsData.apiExtras.lastUpdated) {
-        console.log(chalk.blue(`⏰ Last Updated:    ${chalk.bold(new Date(pointsData.apiExtras.lastUpdated).toLocaleString())}`));
+      if (pointsData.lastWithdrawn !== undefined) {
+        console.log(chalk.blue(`💸 Last Withdrawn:  ${chalk.bold(pointsData.lastWithdrawn.toLocaleString())} credits`));
       }
       
-      if (pointsData.apiExtras.activeSynchronizers) {
-        console.log(chalk.blue(`🔄 Active Synchs:   ${chalk.bold(pointsData.apiExtras.activeSynchronizers)}`));
+      if (pointsData.lastUpdated) {
+        const lastUpdated = pointsData.lastUpdated === 0 ? 'Never' : new Date(pointsData.lastUpdated).toLocaleString();
+        console.log(chalk.blue(`⏰ Last Updated:    ${chalk.bold(lastUpdated)}`));
       }
     }
     
@@ -5175,78 +5171,8 @@ async function parseContainerLogs(containerName) {
 }
 
 /**
- * Get stats from the reflector's HTTP metrics endpoint as a fallback
- * The reflector exposes metrics on port 9090 at /metrics endpoint
- * @param {string} containerName Name of the Docker container
- * @returns {Promise<object|null>} Parsed stats or null if not available
- */
-async function getStatsFromReflectorHTTP(containerName) {
-  try {
-    // Try accessing the reflector's metrics endpoint on localhost:9090 (exposed port)
-    const metricsUrl = `http://localhost:9090/metrics`;
-    
-    console.log(chalk.gray(`📊 Attempting to get stats from reflector HTTP: ${metricsUrl}`));
-    
-    const response = await fetch(metricsUrl, {
-      timeout: 3000
-    });
-    
-    if (!response.ok) {
-      console.log(chalk.yellow(`⚠️ HTTP metrics request failed: ${response.status}`));
-      return null;
-    }
-    
-    const metricsText = await response.text();
-    
-    // Parse Prometheus-style metrics to extract useful information
-    const metrics = parsePrometheusMetrics(metricsText);
-    
-    console.log(chalk.green(`✅ Retrieved stats from reflector HTTP metrics`));
-    
-    return {
-      bytesIn: metrics.reflector_bytes_in || 0,
-      bytesOut: metrics.reflector_bytes_out || 0,
-      sessions: metrics.reflector_sessions || 0,
-      users: metrics.reflector_connections || 0,
-      messages: metrics.reflector_messages || 0,
-      ticks: metrics.reflector_ticks || 0,
-      isEarning: (metrics.reflector_sessions || 0) > 0,
-      proxyConnectionState: (metrics.reflector_sessions || 0) > 0 ? 'CONNECTED' : 'UNKNOWN'
-    };
-    
-  } catch (error) {
-    console.log(chalk.yellow(`⚠️ Error getting HTTP metrics: ${error.message}`));
-    return null;
-  }
-}
-
-/**
- * Parse Prometheus-style metrics text into key-value pairs
- * @param {string} metricsText Raw metrics text from /metrics endpoint
- * @returns {object} Parsed metrics object
- */
-function parsePrometheusMetrics(metricsText) {
-  const metrics = {};
-  
-  const lines = metricsText.split('\n');
-  for (const line of lines) {
-    if (line.startsWith('#') || !line.trim()) {
-      continue; // Skip comments and empty lines
-    }
-    
-    const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)\s+([0-9.]+)/);
-    if (match) {
-      const [, name, value] = match;
-      metrics[name] = parseFloat(value);
-    }
-  }
-  
-  return metrics;
-}
-
-/**
  * Fetch wallet lifetime points from the API
- * @param {string|null} apiKey Optional API key for authenticated requests
+ * @param {string|null} apiKey Optional API key for authenticated requests (deprecated - not used with external API)
  * @param {string} walletAddress Wallet address to fetch points for
  * @param {object} config Configuration object
  * @returns {Promise<object>} API response with points data
@@ -5260,27 +5186,19 @@ async function fetchWalletLifetimePoints(apiKey, walletAddress, config) {
   }
 
   try {
-    // Use the same API endpoint as the Electron app
-    const apiUrl = 'https://startsynqing.com/api/wallet/lifetime-points';
+    // Use the external API endpoint with wallet address in URL
+    const apiUrl = `https://startsynqing.com/api/external/multisynq/synqers/${walletAddress}`;
     
-    const requestBody = {
-      walletAddress: walletAddress
-    };
+    console.log(chalk.gray(`🔗 Fetching points from: ${apiUrl}`));
 
-    // Add API key if provided
     const headers = {
       'Content-Type': 'application/json',
       'User-Agent': `synchronizer-cli/${packageJson.version}`
     };
-    
-    if (apiKey) {
-      headers['Authorization'] = `Bearer ${apiKey}`;
-    }
 
     const response = await fetch(apiUrl, {
-      method: 'POST',
+      method: 'GET',
       headers: headers,
-      body: JSON.stringify(requestBody),
       timeout: 10000
     });
 
@@ -5293,12 +5211,29 @@ async function fetchWalletLifetimePoints(apiKey, walletAddress, config) {
 
     const data = await response.json();
     
+    console.log(chalk.green(`✅ Points API response: ${JSON.stringify(data)}`));
+    
+    // Transform the external API response to match expected format
+    const transformedData = {
+      lifetimePoints: data.serviceCredits || 0,
+      lastWithdrawn: data.lastWithdrawnCredits || 0,
+      lastUpdated: data.lastUpdated || 0,
+      // Add calculated fields for compatibility
+      dailyPoints: 0, // Not available from external API
+      weeklyPoints: 0, // Not available from external API
+      monthlyPoints: 0, // Not available from external API
+      streak: 0, // Not available from external API
+      rank: 'N/A', // Not available from external API
+      multiplier: '1.0' // Not available from external API
+    };
+    
     return {
       success: true,
-      data: data
+      data: transformedData
     };
 
   } catch (error) {
+    console.log(chalk.red(`❌ Points API error: ${error.message}`));
     return {
       success: false,
       error: error.message
@@ -6049,7 +5984,7 @@ async function startReflectorPolling(containerName) {
     // Function to fetch latest stats from reflector
     const fetchReflectorStats = async () => {
       try {
-        const response = await fetch('http://localhost:9090/metrics');
+        const response = await fetch('http://localhost:3000/metrics');
         if (response.ok) {
           const metricsText = await response.text();
           
@@ -6178,4 +6113,103 @@ async function startWebSocketConnection(containerName) {
     console.log(chalk.red(`❌ Failed to connect to WebSocket: ${error.message}`));
     wsConnectionAttempts++;
   }
+}
+
+/**
+ * Get points data specifically for the synchronize points command
+ * This function is isolated and doesn't affect the web dashboard
+ * @param {object} config Configuration object
+ * @returns {Promise<object>} Points data from external API or container stats
+ */
+async function getPointsDataForCommand(config) {
+  if (!config.wallet) {
+    return {
+      timestamp: new Date().toISOString(),
+      points: {
+        total: 0,
+        daily: 0,
+        weekly: 0,
+        monthly: 0,
+        streak: 0,
+        rank: 'N/A',
+        multiplier: '1.0'
+      },
+      error: 'Missing wallet address'
+    };
+  }
+
+  // PRIORITY 1: Try external API first (dedicated for points command)
+  console.log(chalk.cyan('🌐 Fetching points from external API...'));
+  try {
+    const apiData = await fetchWalletLifetimePoints(null, config.wallet, config);
+    
+    if (apiData.success) {
+      const data = apiData.data;
+      console.log(chalk.green(`✅ External API returned ${data.lifetimePoints} service credits`));
+      
+      return {
+        timestamp: new Date().toISOString(),
+        points: {
+          total: data.lifetimePoints,
+          daily: data.dailyPoints,
+          weekly: data.weeklyPoints,
+          monthly: data.monthlyPoints,
+          streak: data.streak,
+          rank: data.rank,
+          multiplier: data.multiplier
+        },
+        // External API specific fields
+        serviceCredits: data.lifetimePoints,
+        lastWithdrawn: data.lastWithdrawn,
+        lastUpdated: data.lastUpdated,
+        source: 'external_api'
+      };
+    } else {
+      console.log(chalk.yellow(`⚠️ External API failed: ${apiData.error}`));
+    }
+  } catch (error) {
+    console.log(chalk.red(`❌ External API error: ${error.message}`));
+  }
+
+  // PRIORITY 2: Fallback to container stats if available
+  const containerStats = await getContainerStats();
+  if (containerStats && (containerStats.walletLifePoints > 0 || containerStats.syncLifePoints > 0)) {
+    console.log(chalk.blue('🐳 Using container stats as fallback'));
+    
+    return {
+      timestamp: new Date().toISOString(),
+      points: {
+        total: containerStats.walletLifePoints + containerStats.syncLifePoints,
+        daily: 0, // Not tracked by container
+        weekly: 0, // Not tracked by container
+        monthly: 0, // Not tracked by container
+        streak: 0, // Not tracked by container
+        rank: 'N/A', // Not tracked by container
+        multiplier: 'N/A' // Not tracked by container
+      },
+      syncLifePoints: containerStats.syncLifePoints,
+      walletLifePoints: containerStats.walletLifePoints,
+      walletBalance: containerStats.walletBalance,
+      source: 'container_stats',
+      containerUptime: `${(containerStats.uptimeHours || 0).toFixed(1)} hours`,
+      isEarning: containerStats.isEarningPoints,
+      connectionState: containerStats.proxyConnectionState
+    };
+  }
+
+  // PRIORITY 3: Error fallback
+  return {
+    timestamp: new Date().toISOString(),
+    points: {
+      total: 0,
+      daily: 0,
+      weekly: 0,
+      monthly: 0,
+      streak: 0,
+      rank: 'N/A',
+      multiplier: '1.0'
+    },
+    error: 'Unable to fetch points data - external API failed and synchronizer container not running',
+    fallback: true
+  };
 }
