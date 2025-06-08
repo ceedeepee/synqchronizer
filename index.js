@@ -4428,31 +4428,21 @@ async function getContainerStats() {
         } else {
           // No WebSocket data available, try HTTP metrics endpoint
           console.log(chalk.yellow('⚠️ No WebSocket data, trying HTTP metrics'));
-          // const httpStats = await getStatsFromReflectorHTTP(containerName);
+          const httpStats = null; // Skip HTTP metrics - port 9090 not accessible from Docker
           
           if (httpStats) {
-            // Use HTTP metrics data
+            console.log(chalk.green('✅ Retrieved stats from reflector HTTP metrics'));
+            
             realStats = {
-              syncLifePoints: 0, // Not available from Prometheus metrics
-              walletLifePoints: 0, // Not available from Prometheus metrics  
-              syncLifeTraffic: (httpStats.bytesIn || 0) + (httpStats.bytesOut || 0),
-              bytesIn: httpStats.bytesIn || 0,
-              bytesOut: httpStats.bytesOut || 0,
-              sessions: httpStats.sessions || 0,
-              users: httpStats.users || 0,
-              proxyConnectionState: httpStats.proxyConnectionState || 'UNKNOWN',
-              availability: 1, // Assume OK if we can get metrics
-              reliability: 1,
-              efficiency: 1,
-              isEarning: httpStats.isEarning
+              ...realStats,
+              ...httpStats,
+              hasRealStats: true,
+              proxyConnectionState: httpStats.proxyConnectionState || 'UNKNOWN'
             };
-            isEarningPoints = realStats.isEarning;
-            console.log(chalk.green('✅ Using HTTP metrics data'));
           } else {
-            // HTTP metrics also failed, fall back to log parsing
             console.log(chalk.yellow('⚠️ HTTP metrics failed, parsing logs'));
+            // Fallback to log parsing for basic container state
             realStats = await parseContainerLogs(containerName);
-            isEarningPoints = realStats ? realStats.isEarning : false;
           }
         }
         
@@ -5984,7 +5974,7 @@ async function startReflectorPolling(containerName) {
     // Function to fetch latest stats from reflector
     const fetchReflectorStats = async () => {
       try {
-        const response = await fetch('http://localhost:3000/metrics');
+        const response = await fetch('http://localhost:9090/metrics');
         if (response.ok) {
           const metricsText = await response.text();
           

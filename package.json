@@ -1,6 +1,6 @@
 {
   "name": "synchronizer-cli",
-  "version": "2.5.13",
+  "version": "2.6.0",
   "description": "WEBSOCKET PORT FIXED - WebSocket connection now uses correct port 3333 where the server actually runs (confirmed with curl test). No more connection failures or socket hang ups - Complete CLI toolkit for Multisynq Synchronizer with working real-time WebSocket data",
   "bin": {
     "synchronize": "index.js"
